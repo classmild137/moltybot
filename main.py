@@ -31,43 +31,58 @@ def load_accounts(json_data=None):
 
     if isinstance(data, dict) and "accounts" in data:
         data = data["accounts"]
-    return data if isinstance(data, list) else []
+    AGENTS: List[AsyncAgent] = []
+    RUNNING_AGENT_NAMES = set()
+    GLOBAL_PROXIES = []
 
-async def start_agents(json_data=None):
-    """Startup or Hot-load agents with Round-Robin Proxy Support."""
-    accounts = load_accounts(json_data)
-    if not accounts:
-        logger.warning("No accounts to load. Waiting for manual upload via dashboard...")
-        return
+    async def start_agents(json_data=None):
+        """Startup or Hot-load agents with In-Memory Proxy Support."""
+        accounts = load_accounts(json_data)
+        if not accounts:
+            logger.warning("No accounts to load. Waiting for manual upload via dashboard...")
+            return
 
-    # Load proxies from file if exists (proxies.txt)
-    proxy_list = []
-    if os.path.exists("proxies.txt"):
-        with open("proxies.txt", "r") as f:
-            proxy_list = [line.strip() for line in f if line.strip()]
-            logger.info(f"Loaded {len(proxy_list)} proxies for {len(accounts)} accounts.")
+        # Gunakan proxy dari memori (jika ada) atau file lokal
+        proxy_list = GLOBAL_PROXIES
+        if not proxy_list and os.path.exists("proxies.txt"):
+            with open("proxies.txt", "r") as f:
+                proxy_list = [line.strip() for line in f if line.strip()]
 
-    logger.info(f"Processing {len(accounts)} accounts...")
-    
-    for i, acc in enumerate(accounts):
-        name = acc.get("name", f"Agent_{i}")
-        if name in RUNNING_AGENT_NAMES:
-            continue
+        if proxy_list:
+            logger.info(f"Using {len(proxy_list)} proxies for {len(accounts)} accounts.")
 
-        key = acc.get("apikey") or acc.get("api_key") or acc.get("key")
-        wallet = acc.get("walletaddress") or acc.get("wallet_address") or acc.get("wallet")
+        logger.info(f"Processing {len(accounts)} accounts...")
 
-        if not key: continue
+        for i, acc in enumerate(accounts):
+            name = acc.get("name", f"Agent_{i}")
+            if name in RUNNING_AGENT_NAMES:
+                continue
 
-        # Round-robin: Pick a proxy from the list
-        proxy = proxy_list[i % len(proxy_list)] if proxy_list else None
+            key = acc.get("apikey") or acc.get("api_key") or acc.get("key")
+            wallet = acc.get("walletaddress") or acc.get("wallet_address") or acc.get("wallet")
 
-        agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy)
-        AGENTS.append(agent)
-        RUNNING_AGENT_NAMES.add(name)
-        
-        asyncio.create_task(agent.start())
-        await asyncio.sleep(1)
+            if not key: continue
+
+            # Round-robin proxy selection
+            proxy = proxy_list[i % len(proxy_list)] if proxy_list else None
+
+            agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy)
+            AGENTS.append(agent)
+            RUNNING_AGENT_NAMES.add(name)
+
+            asyncio.create_task(agent.start())
+            await asyncio.sleep(1)
+
+    @app.post("/api/upload-proxies")
+    async def upload_proxies(file: UploadFile = File(...)):
+        global GLOBAL_PROXIES
+        try:
+            content = await file.read()
+            text = content.decode('utf-8')
+            GLOBAL_PROXIES = [line.strip() for line in text.split('\n') if line.strip()]
+            return {"status": "success", "message": f"Successfully loaded {len(GLOBAL_PROXIES)} proxies into memory!"}
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to load proxies: {str(e)}"}
 
 @app.post("/api/upload-accounts")
 async def upload_accounts(file: UploadFile = File(...)):

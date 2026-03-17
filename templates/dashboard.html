@@ -110,20 +110,42 @@
             cursor: pointer;
         }
     </style>
-</head>
-<body>
-    <div class="header">
-        <h1>MoltyBot Command Center</h1>
-        <div style="display: flex; gap: 10px; align-items: center;">
-            <div id="upload-panel" style="background: #1e293b; padding: 10px; border-radius: 8px; border: 1px dashed #3b82f6;">
-                <input type="file" id="json-file" accept=".json" style="font-size: 0.8em; color: white;">
-                <button onclick="uploadJSON()" style="background: #3b82f6; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em;">🚀 Load Agents</button>
-            </div>
-            <div id="total-agents" style="background: #334155; padding: 10px; border-radius: 8px;">Agents: 0</div>
+<div class="header">
+    <h1>MoltyBot Command Center</h1>
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <!-- Proxy Panel -->
+        <div id="proxy-panel" style="background: #1e293b; padding: 10px; border-radius: 8px; border: 1px dashed #10b981;">
+            <input type="file" id="proxy-file" accept=".txt" style="font-size: 0.8em; color: white; width: 140px;">
+            <button onclick="uploadProxies()" style="background: #10b981; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em;">🛰️ Load Proxies</button>
         </div>
+        <!-- Account Panel -->
+        <div id="upload-panel" style="background: #1e293b; padding: 10px; border-radius: 8px; border: 1px dashed #3b82f6;">
+            <input type="file" id="json-file" accept=".json" style="font-size: 0.8em; color: white; width: 140px;">
+            <button onclick="uploadJSON()" style="background: #3b82f6; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em;">🚀 Load Agents</button>
+        </div>
+        <div id="total-agents" style="background: #334155; padding: 10px; border-radius: 8px;">Agents: 0</div>
     </div>
-    
-    <div id="agent-grid" class="grid">
+</div>
+
+<script>
+    async function uploadProxies() {
+        const fileInput = document.getElementById('proxy-file');
+        if (fileInput.files.length === 0) {
+            alert("Please select a proxy (.txt) file first!");
+            return;
+        }
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        try {
+            const res = await fetch('/api/upload-proxies', { method: 'POST', body: formData });
+            const result = await res.json();
+            alert(result.message);
+            fileInput.value = '';
+        } catch (e) { alert("Proxy upload failed!"); }
+    }
+
+    async function uploadJSON() {
+...
         <!-- Agents will be injected here -->
     </div>
 
