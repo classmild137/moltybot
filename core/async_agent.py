@@ -111,29 +111,34 @@ class AsyncAgent:
                 await asyncio.sleep(30)
 
     async def find_and_join_game(self) -> bool:
-        """Individual hunting per agent using their assigned proxy."""
+        """Individual hunting per agent with detailed logging."""
         Monitor.update(self.name, status="Searching")
         try:
-            # Setiap agent memanggil API sendiri lewat IP-nya masing-masing
             rooms = await self.api.list_games(status="waiting")
-            if not rooms:
-                await asyncio.sleep(random.randint(10, 20))
+            
+            # Jika respon benar-benar kosong atau network error
+            if rooms is None:
+                await asyncio.sleep(15)
                 return False
             
-            free_games = [g for g in rooms if g.get("entryType") == "free"]
-
+            total_rooms = len(rooms) if isinstance(rooms, list) else 0
+            free_games = [g for g in rooms if g.get("entryType") == "free"] if isinstance(rooms, list) else []
+            
             if not free_games:
-                await asyncio.sleep(random.randint(5, 15))
+                # Log ini akan muncul di dashboard setiap kali scan (agar tahu bot tidak bengong)
+                # Gunakan interval agar tidak spam (misal setiap 5x scan)
+                if not hasattr(self, "_scan_count"): self._scan_count = 0
+                self._scan_count += 1
+                if self._scan_count % 5 == 1:
+                    await self.log(f"Scan: {total_rooms} rooms found, 0 FREE rooms. Waiting...")
+                
+                await asyncio.sleep(random.randint(15, 30))
                 return False
 
             # Ambil room pertama yang tersedia
             target_game = free_games[0]
             gid = target_game["id"]
-            
-            # Jitter kecil sebelum join agar tidak berbarengan di satu detik
-            await asyncio.sleep(random.uniform(0.1, 2.0))
-            
-            await self.log(f"Joining game {gid[:8]}...")
+            await self.log(f"FOUND FREE ROOM: {target_game.get('name')}! Attempting to join...")
             try:
                 agent = await self.api.register_agent(gid, self.name)
                 self.game_id = gid
