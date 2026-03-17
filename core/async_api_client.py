@@ -56,7 +56,8 @@ class AsyncAPIClient:
                         if not response_json.get("success", False):
                             error = response_json.get("error", {})
                             code = error.get("code", "UNKNOWN")
-                            msg = error.get("message", "API returned success: false")
+                            # Ambil pesan error asli dari server jika ada
+                            msg = error.get("message") or response_json.get("message") or "API returned success: false"
                             
                             # Fatal errors
                             fatal = ("AGENT_NOT_FOUND", "GAME_NOT_FOUND", "UNAUTHORIZED")

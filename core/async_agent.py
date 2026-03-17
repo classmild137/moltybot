@@ -199,11 +199,27 @@ class AsyncAgent:
         turn_count = 0
         last_action_time = 0
         watch_start_time = 0
+        last_health_check = time.time()
 
         while True:
             try:
-                # Rate limit / Turn wait
                 now = time.time()
+                
+                # --- HEALTH CHECK (STUCK GUARD) setiap 15 menit ---
+                if now - last_health_check > 900: # 15 menit
+                    last_health_check = now
+                    try:
+                        acc = await self.api.get_account()
+                        active_games = acc.get("currentGames") or []
+                        # Jika server bilang tidak ada game aktif, tapi bot merasa sedang bermain
+                        still_in_game = any(g.get("gameId") == self.game_id for g in active_games)
+                        if not still_in_game:
+                            await self.log("Health Check: Game not found in account info. Forcing hunt.")
+                            self.game_id = None
+                            return
+                    except: pass # Abaikan jika API error sejenak
+                
+                # Rate limit / Turn wait
                 time_since_last = now - last_action_time
                 if time_since_last < TURN_INTERVAL:
                     await asyncio.sleep(1) 
