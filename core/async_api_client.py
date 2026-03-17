@@ -28,7 +28,14 @@ class AsyncAPIClient:
             try:
                 async with ClientSession(headers=self.headers, timeout=self.timeout) as session:
                     async with session.request(method, url, json=json) as resp:
-                        # Jika Unauthorized, langsung stop retry
+                        # 1. Handle Rate Limit (429)
+                        if resp.status == 429:
+                            wait_time = 30 * (attempt + 1)
+                            logger.warning(f"Rate Limit (429) hit! Cooling down for {wait_time}s...")
+                            await asyncio.sleep(wait_time)
+                            continue
+
+                        # 2. Handle Unauthorized (401)
                         if resp.status == 401:
                             raise APIError("Invalid API Key (Unauthorized)", "UNAUTHORIZED")
                             
@@ -36,10 +43,13 @@ class AsyncAPIClient:
                             response_json = await resp.json()
                         except:
                             text = await resp.text()
+                            if "Cloudflare" in text or "challenge" in text:
+                                logger.error("IP Blocked or Challenged by Cloudflare/WAF!")
+                                await asyncio.sleep(60) # Heavy wait
                             if attempt < max_retries - 1:
                                 await asyncio.sleep(2)
                                 continue
-                            raise APIError(f"Invalid JSON: {text[:50]}", "SERVER_ERROR")
+                            raise APIError(f"Invalid JSON/HTML: {text[:50]}", "SERVER_ERROR")
 
                         if not response_json.get("success", False):
                             error = response_json.get("error", {})

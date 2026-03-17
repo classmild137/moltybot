@@ -7,6 +7,20 @@ class Monitor:
     Used by the dashboard to render real-time status.
     """
     _agents: Dict[str, Dict[str, Any]] = {}
+    _room_cache: list = []
+    _last_room_check: float = 0
+
+    @classmethod
+    def update_room_cache(cls, rooms: list):
+        cls._room_cache = rooms
+        cls._last_room_check = datetime.now().timestamp()
+
+    @classmethod
+    def get_rooms(cls):
+        # Cache valid selama 15 detik
+        if datetime.now().timestamp() - cls._last_room_check > 15:
+            return None 
+        return cls._room_cache
     
     @classmethod
     def register(cls, agent_name: str, wallet: str):

@@ -110,19 +110,29 @@ class AsyncAgent:
                 await asyncio.sleep(30)
 
     async def find_and_join_game(self) -> bool:
-        """Finds a free game and joins it."""
+        """Finds a free game using Shared Cache to save API calls."""
         Monitor.update(self.name, status="Searching")
         try:
-            games = await self.api.list_games(status="waiting")
-            free_games = [g for g in games if g.get("entryType") == "free"]
+            # 1. Check Shared Cache First
+            rooms = Monitor.get_rooms()
+            if rooms is None:
+                # Cache expired, only ONE agent will fetch from API
+                rooms = await self.api.list_games(status="waiting")
+                Monitor.update_room_cache(rooms)
+            
+            free_games = [g for g in rooms if g.get("entryType") == "free"]
 
             if not free_games:
-                await self.log("No free games found. Waiting for a room to appear...")
+                # Tambahkan jitter di sini agar 55 bot tidak mencari di detik yang sama
+                await asyncio.sleep(random.randint(5, 15))
                 return False
 
-            # Try to join an existing game
+            # 2. Try to join
             target_game = free_games[0]
             gid = target_game["id"]
+            
+            # Staggered join attempt (1-5s) to avoid race condition
+            await asyncio.sleep(random.uniform(0.5, 3.0))
             
             await self.log(f"Joining game {gid[:8]}...")
             try:
@@ -132,23 +142,24 @@ class AsyncAgent:
                 await self.log("Joined successfully!")
                 return True
             except APIError as e:
-                if e.code == "ONE_AGENT_PER_API_KEY":
-                    await self.log("Already in a game (API limit). Waiting...")
-                    await asyncio.sleep(60) # Wait a bit longer
-                elif e.code == "TOO_MANY_AGENTS_PER_IP":
-                    await self.log("IP Limit reached. Waiting random time...")
-                    await asyncio.sleep(random.randint(10, 30))
-                else:
-                    await self.log(f"Join failed: {e}")
+                # Limit IP Handling (5 agents per room/IP)
+                if e.code == "TOO_MANY_AGENTS_PER_IP":
+                    await self.log("IP Limit (5/room) reached. Waiting for next room...")
+                    await asyncio.sleep(20)
                 return False
 
         except Exception as e:
-            await self.log(f"Error finding game: {e}")
+            await self.log(f"Hunting Error: {e}")
             return False
 
     async def play_game(self):
-        """Main Gameplay Loop"""
+        """Gameplay Loop with Jitter to spread API load."""
         Monitor.update(self.name, status="Waiting Start", game_id=self.game_id)
+        
+        # Jitter start delay for each bot (0-30s) so they don't sync up
+        await asyncio.sleep(random.randint(0, 30))
+        
+        # ... (rest of waiting start) ...
         
         # Wait for start
         while True:
