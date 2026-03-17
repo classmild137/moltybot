@@ -11,7 +11,7 @@ from learning.memory import GameMemory
 from learning.ml_engine import LearningEngine
 from core.monitor import Monitor
 
-# Constants (Hardcoded for simplicity/robustness as per prompt reqs)
+# Constants
 BASE_URL = "https://cdn.moltyroyale.com/api"
 POLL_INTERVAL_WAITING = 5
 POLL_INTERVAL_DEAD = 15
@@ -23,13 +23,13 @@ class AsyncAgent:
     def __init__(self, name: str, api_key: str, wallet_address: str, proxy: str = None, index: int = 0, data_dir: str = "data"):
         self.name = name
         self.wallet_address = wallet_address
-        self.index = index # Simpan index antrian
+        self.index = index
         self.api = AsyncAPIClient(BASE_URL, api_key, proxy=proxy)
         
-        # Initialize components (Reusing existing core logic)
+        # Initialize components
         self.memory = GameMemory(data_dir=f"{data_dir}/{name}")
         self.learning = LearningEngine(self.memory)
-        self.analyzer = StateAnalyzer() # Default params
+        self.analyzer = StateAnalyzer() 
         self.strategy = StrategyEngine(self.analyzer, self.memory, self.learning)
         
         self.game_id: Optional[str] = None
@@ -152,32 +152,20 @@ class AsyncAgent:
             except APIError as e:
                 if e.code == "TOO_MANY_AGENTS_PER_IP":
                     await self.log("IP Limit (5/room) hit. Trying next...")
+                elif e.code == "ACCOUNT_ALREADY_IN_GAME":
+                    await self.log("Account already in game. Syncing...")
+                    return True
                 return False
 
         except Exception as e:
             Monitor.release_search() # Pastikan kunci dilepas jika error
             await self.log(f"Hunting Error: {e}")
-            return False
-                    await self.log("IP Limit reached for this room. Waiting...")
-                    await asyncio.sleep(30)
-                elif e.code == "ACCOUNT_ALREADY_IN_GAME":
-                    await self.log("Account already in game. Syncing...")
-                    return True # Akan terdeteksi di loop berikutnya
-                return False
-
-        except Exception as e:
-            await self.log(f"Hunting Error: {e}")
             await asyncio.sleep(10)
             return False
 
     async def play_game(self):
-        """Gameplay Loop with Jitter to spread API load."""
+        """Main Gameplay Loop with Robust Data Handling"""
         Monitor.update(self.name, status="Waiting Start", game_id=self.game_id)
-        
-        # Jitter start delay for each bot (0-30s) so they don't sync up
-        await asyncio.sleep(random.randint(0, 30))
-        
-        # ... (rest of waiting start) ...
         
         # Wait for start
         while True:
@@ -243,6 +231,17 @@ class AsyncAgent:
                 if not is_alive or game_status == "finished":
                     await self.log("Game Over / Died")
                     rewards = res_obj.get("rewards", 0)
+                    
+                    # Update Win Ratio on Game End
+                    try:
+                        acc_info = await self.api.get_account()
+                        if acc_info:
+                            Monitor.update(self.name, 
+                                balance=acc_info.get("balance", 0),
+                                win_ratio=f"{acc_info.get('totalWins', 0)}/{acc_info.get('totalGames', 0)}"
+                            )
+                    except: pass
+
                     Monitor.update(self.name, status="Dead/Finished", rewards_today=rewards)
                     self.memory.end_game(
                         is_winner=res_obj.get("isWinner", False),
@@ -273,11 +272,9 @@ class AsyncAgent:
                         self.memory.record_turn(turn_count, intel, main_action, res)
                     
                     elif res.get("error", {}).get("code") == "ALREADY_ACTED":
-                         # We acted too early? Sync issue? Just wait a bit.
-                         last_action_time = time.time() # Reset timer effectively to wait another cycle
+                         last_action_time = time.time()
                     
                 else:
-                    # Should not happen with current strategy, but fallback
                     await asyncio.sleep(5)
 
             except Exception as e:
