@@ -48,28 +48,36 @@ class AsyncAgent:
         # 1. Ensure Account & Wallet
         try:
             account = await self.api.get_account()
-            if not account:
-                await self.log("Failed to get account info")
+            if not account or not isinstance(account, dict):
+                await self.log(f"Failed to get account info: Response was {type(account)}")
                 return
 
-            server_wallet = account.get("walletAddress")
+            self.name = account.get("name", self.name)
+            await self.log(f"Account Verified: {self.name}")
+            
+            server_wallet = account.get("walletAddress") or account.get("wallet")
             if not server_wallet and self.wallet_address:
                 await self.log(f"Registering wallet: {self.wallet_address}")
                 await self.api.set_wallet(self.wallet_address)
             
             # Check existing games
-            current_games = account.get("currentGames", [])
+            current_games = account.get("currentGames") or []
+            if not isinstance(current_games, list): current_games = []
+            
             for game in current_games:
-                if game.get("entryType") == "free" and game.get("gameStatus") in ("running", "waiting"):
-                    if game.get("isAlive"):
+                if game.get("gameStatus") in ("running", "waiting"):
+                    if game.get("isAlive", True):
                         self.game_id = game.get("gameId")
                         self.agent_id = game.get("agentId")
                         await self.log(f"Resuming game {self.game_id[:8]}...")
                         Monitor.update(self.name, status="Resuming", game_id=self.game_id)
                         await self.play_game()
                         return
+        except APIError as e:
+            await self.log(f"Startup API Error: {e.code} - {str(e)}")
+            return
         except Exception as e:
-            await self.log(f"Startup error: {e}")
+            await self.log(f"Startup Crash: {str(e)}")
             return
 
         # 2. Loop: Find Game -> Play -> Repeat
