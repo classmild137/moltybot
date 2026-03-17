@@ -9,18 +9,23 @@ class Monitor:
     _agents: Dict[str, Dict[str, Any]] = {}
     _room_cache: list = []
     _last_room_check: float = 0
+    _search_lock: bool = False
 
     @classmethod
-    def update_room_cache(cls, rooms: list):
-        cls._room_cache = rooms
-        cls._last_room_check = datetime.now().timestamp()
+    def can_search(cls):
+        """Check if enough time has passed since the last global search."""
+        now = datetime.now().timestamp()
+        # Minimal jeda 2 detik antar request pencarian room secara global
+        if now - cls._last_room_check >= 2.0 and not cls._search_lock:
+            cls._search_lock = True
+            cls._last_room_check = now
+            return True
+        return False
 
     @classmethod
-    def get_rooms(cls):
-        # Cache valid selama 15 detik
-        if datetime.now().timestamp() - cls._last_room_check > 15:
-            return None 
-        return cls._room_cache
+    def release_search(cls):
+        """Release the search lock after API call is done."""
+        cls._search_lock = False
     
     @classmethod
     def register(cls, agent_name: str, wallet: str):

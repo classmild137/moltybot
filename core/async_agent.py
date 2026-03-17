@@ -20,9 +20,10 @@ TURN_INTERVAL = 60  # Real time seconds per turn
 logger = logging.getLogger("MoltyBot.Agent")
 
 class AsyncAgent:
-    def __init__(self, name: str, api_key: str, wallet_address: str, proxy: str = None, data_dir: str = "data"):
+    def __init__(self, name: str, api_key: str, wallet_address: str, proxy: str = None, index: int = 0, data_dir: str = "data"):
         self.name = name
         self.wallet_address = wallet_address
+        self.index = index # Simpan index antrian
         self.api = AsyncAPIClient(BASE_URL, api_key, proxy=proxy)
         
         # Initialize components (Reusing existing core logic)
@@ -111,34 +112,37 @@ class AsyncAgent:
                 await asyncio.sleep(30)
 
     async def find_and_join_game(self) -> bool:
-        """Individual hunting per agent with detailed logging."""
+        """Dynamic sequential hunting using Global Throttle (max 1 search per 2s)."""
+        Monitor.update(self.name, status="Waiting Queue")
+        
+        # Ngantri sampai giliran Global Throttle mengizinkan (2 detik sekali)
+        while not Monitor.can_search():
+            await asyncio.sleep(0.5)
+
         Monitor.update(self.name, status="Searching")
         try:
+            # Panggil API dengan IP masing-masing (Proxy/Direct)
             rooms = await self.api.list_games(status="waiting")
-            
-            # Jika respon benar-benar kosong atau network error
-            if rooms is None:
-                await asyncio.sleep(15)
-                return False
+            # Segera lepaskan kunci agar bot berikutnya bisa ngantri
+            Monitor.release_search()
+
+            if rooms is None: return False
             
             total_rooms = len(rooms) if isinstance(rooms, list) else 0
             free_games = [g for g in rooms if g.get("entryType") == "free"] if isinstance(rooms, list) else []
             
             if not free_games:
-                # Log ini akan muncul di dashboard setiap kali scan (agar tahu bot tidak bengong)
-                # Gunakan interval agar tidak spam (misal setiap 5x scan)
                 if not hasattr(self, "_scan_count"): self._scan_count = 0
                 self._scan_count += 1
-                if self._scan_count % 5 == 1:
-                    await self.log(f"Scan: {total_rooms} rooms found, 0 FREE rooms. Waiting...")
-                
-                await asyncio.sleep(random.randint(15, 30))
+                if self._scan_count % 3 == 1:
+                    await self.log(f"Scan: {total_rooms} rooms found, 0 FREE. Retrying...")
                 return False
 
             # Ambil room pertama yang tersedia
             target_game = free_games[0]
             gid = target_game["id"]
-            await self.log(f"FOUND FREE ROOM: {target_game.get('name')}! Attempting to join...")
+            await self.log(f"FOUND ROOM: {target_game.get('name')}! Joining...")
+            
             try:
                 agent = await self.api.register_agent(gid, self.name)
                 self.game_id = gid
@@ -147,7 +151,13 @@ class AsyncAgent:
                 return True
             except APIError as e:
                 if e.code == "TOO_MANY_AGENTS_PER_IP":
-                    # Ini pengaman terakhir jika di room tersebut sudah ada 5 bot dari IP yg sama
+                    await self.log("IP Limit (5/room) hit. Trying next...")
+                return False
+
+        except Exception as e:
+            Monitor.release_search() # Pastikan kunci dilepas jika error
+            await self.log(f"Hunting Error: {e}")
+            return False
                     await self.log("IP Limit reached for this room. Waiting...")
                     await asyncio.sleep(30)
                 elif e.code == "ACCOUNT_ALREADY_IN_GAME":

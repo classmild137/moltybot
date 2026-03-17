@@ -67,25 +67,22 @@ async def start_agents(json_data=None):
 
         if not key: continue
 
-        # Jika punya 10 proxy dan 55 akun: 
-        # i=0-49 akan dapat proxy (round-robin), i=50-54 akan dapat None (Direct IP)
         proxy = None
         proxy_info = "Direct"
-        if proxy_list and i < (len(proxy_list) * 5): # Maks 5 bot per proxy (Safety Limit)
+        if proxy_list and i < (len(proxy_list) * 5):
             proxy = proxy_list[i % len(proxy_list)]
-            # Masking user:pass untuk display
             p_parts = proxy.split('@')
             proxy_info = p_parts[-1] if len(p_parts) > 1 else proxy
         
-        agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy)
+        # Kirim index (i) ke AsyncAgent
+        agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy, index=i)
         AGENTS.append(agent)
         RUNNING_AGENT_NAMES.add(name)
         
-        # Update monitor awal
         Monitor.update(name, proxy=proxy_info, proxy_status="Connecting...")
         
         asyncio.create_task(agent.start())
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5) # Stagger start sedikit
 
 @app.post("/api/upload-proxies")
 async def upload_proxies(file: UploadFile = File(...)):
