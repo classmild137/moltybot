@@ -20,10 +20,10 @@ TURN_INTERVAL = 60  # Real time seconds per turn
 logger = logging.getLogger("MoltyBot.Agent")
 
 class AsyncAgent:
-    def __init__(self, name: str, api_key: str, wallet_address: str, data_dir: str = "data"):
+    def __init__(self, name: str, api_key: str, wallet_address: str, proxy: str = None, data_dir: str = "data"):
         self.name = name
         self.wallet_address = wallet_address
-        self.api = AsyncAPIClient(BASE_URL, api_key)
+        self.api = AsyncAPIClient(BASE_URL, api_key, proxy=proxy)
         
         # Initialize components (Reusing existing core logic)
         self.memory = GameMemory(data_dir=f"{data_dir}/{name}")

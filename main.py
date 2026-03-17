@@ -34,11 +34,18 @@ def load_accounts(json_data=None):
     return data if isinstance(data, list) else []
 
 async def start_agents(json_data=None):
-    """Startup or Hot-load agents."""
+    """Startup or Hot-load agents with Round-Robin Proxy Support."""
     accounts = load_accounts(json_data)
     if not accounts:
         logger.warning("No accounts to load. Waiting for manual upload via dashboard...")
         return
+
+    # Load proxies from file if exists (proxies.txt)
+    proxy_list = []
+    if os.path.exists("proxies.txt"):
+        with open("proxies.txt", "r") as f:
+            proxy_list = [line.strip() for line in f if line.strip()]
+            logger.info(f"Loaded {len(proxy_list)} proxies for {len(accounts)} accounts.")
 
     logger.info(f"Processing {len(accounts)} accounts...")
     
@@ -52,7 +59,10 @@ async def start_agents(json_data=None):
 
         if not key: continue
 
-        agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet)
+        # Round-robin: Pick a proxy from the list
+        proxy = proxy_list[i % len(proxy_list)] if proxy_list else None
+
+        agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy)
         AGENTS.append(agent)
         RUNNING_AGENT_NAMES.add(name)
         

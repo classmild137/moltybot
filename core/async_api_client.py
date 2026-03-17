@@ -12,9 +12,10 @@ class APIError(Exception):
         super().__init__(f"[{code}] {message}")
 
 class AsyncAPIClient:
-    def __init__(self, base_url: str, api_key: str):
+    def __init__(self, base_url: str, api_key: str, proxy: str = None):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        self.proxy = proxy  # Format: "http://user:pass@host:port"
         self.headers = {
             "Content-Type": "application/json",
             "X-API-Key": api_key
@@ -26,8 +27,9 @@ class AsyncAPIClient:
         
         for attempt in range(max_retries):
             try:
+                # Menggunakan proxy jika tersedia
                 async with ClientSession(headers=self.headers, timeout=self.timeout) as session:
-                    async with session.request(method, url, json=json) as resp:
+                    async with session.request(method, url, json=json, proxy=self.proxy) as resp:
                         # 1. Handle Rate Limit (429)
                         if resp.status == 429:
                             wait_time = 30 * (attempt + 1)
