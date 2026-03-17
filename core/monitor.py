@@ -35,6 +35,8 @@ class Monitor:
             "ep": 10,
             "balance": 0,
             "win_ratio": "0/0",
+            "proxy": "-",
+            "proxy_status": "Direct",
             "last_action": "-",
             "last_update": datetime.now().isoformat(),
             "rewards_today": 0,

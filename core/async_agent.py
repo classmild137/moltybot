@@ -54,6 +54,7 @@ class AsyncAgent:
 
             self.name = account.get("name", self.name)
             await self.log(f"Account Verified: {self.name}")
+            Monitor.update(self.name, proxy_status="Success ✓")
             
             # Update Balance & Win Ratio on Monitor
             balance = account.get("balance", 0)

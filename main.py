@@ -67,12 +67,22 @@ async def start_agents(json_data=None):
 
         if not key: continue
 
-        # Round-robin proxy
-        proxy = proxy_list[i % len(proxy_list)] if proxy_list else None
-
+        # Jika punya 10 proxy dan 55 akun: 
+        # i=0-49 akan dapat proxy (round-robin), i=50-54 akan dapat None (Direct IP)
+        proxy = None
+        proxy_info = "Direct"
+        if proxy_list and i < (len(proxy_list) * 5): # Maks 5 bot per proxy (Safety Limit)
+            proxy = proxy_list[i % len(proxy_list)]
+            # Masking user:pass untuk display
+            p_parts = proxy.split('@')
+            proxy_info = p_parts[-1] if len(p_parts) > 1 else proxy
+        
         agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy)
         AGENTS.append(agent)
         RUNNING_AGENT_NAMES.add(name)
+        
+        # Update monitor awal
+        Monitor.update(name, proxy=proxy_info, proxy_status="Connecting...")
         
         asyncio.create_task(agent.start())
         await asyncio.sleep(1)
