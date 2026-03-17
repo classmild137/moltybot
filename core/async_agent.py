@@ -169,36 +169,41 @@ class AsyncAgent:
 
                 # Get State
                 state_data = await self.api.get_state(self.game_id, self.agent_id)
-                if not state_data:
+                if not state_data or not isinstance(state_data, dict):
                     await asyncio.sleep(5)
                     continue
                 
-                # Check Death/Game Over
+                # Check Self Data
                 self_data = state_data.get("self")
-                if not self_data:
+                if not self_data or not isinstance(self_data, dict):
                     await asyncio.sleep(5)
                     continue
 
                 is_alive = self_data.get("isAlive", True)
                 game_status = state_data.get("gameStatus")
+                
+                # Robust data for Monitor
+                res_obj = state_data.get("result") or {}
+                if not isinstance(res_obj, dict): res_obj = {}
+                
+                reg_obj = state_data.get("currentRegion") or {}
+                if not isinstance(reg_obj, dict): reg_obj = {}
 
                 # Update Monitor
-                current_region = state_data.get("currentRegion", {})
                 Monitor.update(self.name, 
                     hp=self_data.get("hp", 0),
                     ep=self_data.get("ep", 0),
-                    region=current_region.get("name", "Unknown"),
+                    region=reg_obj.get("name", "Unknown"),
                     game_id=self.game_id
                 )
 
                 if not is_alive or game_status == "finished":
                     await self.log("Game Over / Died")
-                    result = state_data.get("result", {})
-                    rewards = result.get("rewards", 0)
-                    Monitor.update(self.name, status="Dead/Finished", rewards_today=rewards) # Simplified accumulation
+                    rewards = res_obj.get("rewards", 0)
+                    Monitor.update(self.name, status="Dead/Finished", rewards_today=rewards)
                     self.memory.end_game(
-                        is_winner=result.get("isWinner", False),
-                        final_rank=result.get("finalRank", 99),
+                        is_winner=res_obj.get("isWinner", False),
+                        final_rank=res_obj.get("finalRank", 99),
                         final_hp=self_data.get("hp", 0),
                         moltz_earned=rewards
                     )
