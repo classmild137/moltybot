@@ -60,6 +60,8 @@ class AsyncAgent:
             wins = account.get("totalWins", 0)
             games = account.get("totalGames", 0)
             Monitor.update(self.name, balance=balance, win_ratio=f"{wins}/{games}")
+            
+            server_wallet = account.get("walletAddress") or account.get("wallet")
             if not server_wallet and self.wallet_address:
                 await self.log(f"Registering wallet: {self.wallet_address}")
                 await self.api.set_wallet(self.wallet_address)
