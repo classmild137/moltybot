@@ -113,7 +113,8 @@ class AsyncAgent:
 
     async def find_and_join_game(self) -> bool:
         """Dynamic sequential hunting using Global Throttle (max 1 search per 2s)."""
-        Monitor.update(self.name, status="Waiting Queue")
+        # FORCE RESET agar tidak terjebak status "Dead (Watching)" di Dashboard
+        Monitor.update(self.name, status="Waiting Queue", game_id="-", region="-", hp=100, ep=10)
         
         # Ngantri sampai giliran Global Throttle mengizinkan (2 detik sekali)
         while not Monitor.can_search():
@@ -197,6 +198,7 @@ class AsyncAgent:
 
         turn_count = 0
         last_action_time = 0
+        watch_start_time = 0
 
         while True:
             try:
@@ -249,6 +251,14 @@ class AsyncAgent:
                 if not is_alive or game_status == "finished":
                     # JIKA MATI TAPI GAME MASIH JALAN: Tunggu sampai SELESAI
                     if not is_alive and game_status != "finished":
+                        if watch_start_time == 0: watch_start_time = time.time()
+                        
+                        # Timeout 15 menit agar tidak stuck selamanya
+                        if time.time() - watch_start_time > 900:
+                            await self.log("Watch timeout (15m). Forcing new hunt.")
+                            self.game_id = None
+                            return
+
                         Monitor.update(self.name, status="Dead (Watching)", hp=0)
                         if turn_count % 5 == 0: # Log setiap 5 turn agar tidak spam
                             await self.log(f"Eliminated. Waiting for game {self.game_id[:8]} to finish...")
