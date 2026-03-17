@@ -164,15 +164,21 @@ class AsyncAgent:
                 now = time.time()
                 time_since_last = now - last_action_time
                 if time_since_last < TURN_INTERVAL:
-                    await asyncio.sleep(1) # Check frequently but don't spam API
-                    if time_since_last < TURN_INTERVAL - 2: # Only check exact timing if close
-                        continue
+                    await asyncio.sleep(1) 
+                    continue
 
                 # Get State
                 state_data = await self.api.get_state(self.game_id, self.agent_id)
+                if not state_data:
+                    await asyncio.sleep(5)
+                    continue
                 
                 # Check Death/Game Over
-                self_data = state_data.get("self", {})
+                self_data = state_data.get("self")
+                if not self_data:
+                    await asyncio.sleep(5)
+                    continue
+
                 is_alive = self_data.get("isAlive", True)
                 game_status = state_data.get("gameStatus")
 
