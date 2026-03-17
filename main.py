@@ -4,19 +4,22 @@ import logging
 import os
 import uvicorn
 from typing import List
+from fastapi import UploadFile, File, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 
 from dashboard import app
 from core.async_agent import AsyncAgent
+from core.monitor import Monitor
 
-# Setup simple logging
+# Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("MoltyBot.Orchestrator")
 
-from fastapi import UploadFile, File
-from core.monitor import Monitor
-
+# Global Variables
 AGENTS: List[AsyncAgent] = []
 RUNNING_AGENT_NAMES = set()
+GLOBAL_PROXIES = []
 
 def load_accounts(json_data=None):
     """Load accounts from file or raw JSON data"""
@@ -26,63 +29,65 @@ def load_accounts(json_data=None):
         json_path = "mort_royal_bots_export.json"
         if not os.path.exists(json_path):
             return []
-        with open(json_path, 'r') as f:
-            data = json.load(f)
+        try:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+        except:
+            return []
 
     if isinstance(data, dict) and "accounts" in data:
         data = data["accounts"]
-    AGENTS: List[AsyncAgent] = []
-    RUNNING_AGENT_NAMES = set()
-    GLOBAL_PROXIES = []
+    return data if isinstance(data, list) else []
 
-    async def start_agents(json_data=None):
-        """Startup or Hot-load agents with In-Memory Proxy Support."""
-        accounts = load_accounts(json_data)
-        if not accounts:
-            logger.warning("No accounts to load. Waiting for manual upload via dashboard...")
-            return
+async def start_agents(json_data=None):
+    """Startup or Hot-load agents with In-Memory Proxy Support."""
+    accounts = load_accounts(json_data)
+    if not accounts:
+        logger.warning("No accounts to load. Waiting for manual upload...")
+        return
 
-        # Gunakan proxy dari memori (jika ada) atau file lokal
-        proxy_list = GLOBAL_PROXIES
-        if not proxy_list and os.path.exists("proxies.txt"):
+    # Use proxies from memory or file
+    proxy_list = GLOBAL_PROXIES
+    if not proxy_list and os.path.exists("proxies.txt"):
+        try:
             with open("proxies.txt", "r") as f:
                 proxy_list = [line.strip() for line in f if line.strip()]
+        except:
+            pass
 
-        if proxy_list:
-            logger.info(f"Using {len(proxy_list)} proxies for {len(accounts)} accounts.")
+    logger.info(f"Processing {len(accounts)} accounts with {len(proxy_list)} proxies...")
+    
+    for i, acc in enumerate(accounts):
+        name = acc.get("name", f"Agent_{i}")
+        if name in RUNNING_AGENT_NAMES:
+            continue
 
-        logger.info(f"Processing {len(accounts)} accounts...")
+        key = acc.get("apikey") or acc.get("api_key") or acc.get("key")
+        wallet = acc.get("walletaddress") or acc.get("wallet_address") or acc.get("wallet")
 
-        for i, acc in enumerate(accounts):
-            name = acc.get("name", f"Agent_{i}")
-            if name in RUNNING_AGENT_NAMES:
-                continue
+        if not key: continue
 
-            key = acc.get("apikey") or acc.get("api_key") or acc.get("key")
-            wallet = acc.get("walletaddress") or acc.get("wallet_address") or acc.get("wallet")
+        # Round-robin proxy
+        proxy = proxy_list[i % len(proxy_list)] if proxy_list else None
 
-            if not key: continue
+        agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy)
+        AGENTS.append(agent)
+        RUNNING_AGENT_NAMES.add(name)
+        
+        asyncio.create_task(agent.start())
+        await asyncio.sleep(1)
 
-            # Round-robin proxy selection
-            proxy = proxy_list[i % len(proxy_list)] if proxy_list else None
-
-            agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy)
-            AGENTS.append(agent)
-            RUNNING_AGENT_NAMES.add(name)
-
-            asyncio.create_task(agent.start())
-            await asyncio.sleep(1)
-
-    @app.post("/api/upload-proxies")
-    async def upload_proxies(file: UploadFile = File(...)):
-        global GLOBAL_PROXIES
-        try:
-            content = await file.read()
-            text = content.decode('utf-8')
-            GLOBAL_PROXIES = [line.strip() for line in text.split('\n') if line.strip()]
-            return {"status": "success", "message": f"Successfully loaded {len(GLOBAL_PROXIES)} proxies into memory!"}
-        except Exception as e:
-            return {"status": "error", "message": f"Failed to load proxies: {str(e)}"}
+@app.post("/api/upload-proxies")
+async def upload_proxies(file: UploadFile = File(...)):
+    global GLOBAL_PROXIES
+    try:
+        content = await file.read()
+        text = content.decode('utf-8')
+        GLOBAL_PROXIES = [line.strip() for line in text.split('\n') if line.strip()]
+        logger.info(f"Loaded {len(GLOBAL_PROXIES)} proxies via API")
+        return {"status": "success", "message": f"Successfully loaded {len(GLOBAL_PROXIES)} proxies!"}
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to load proxies: {str(e)}"}
 
 @app.post("/api/upload-accounts")
 async def upload_accounts(file: UploadFile = File(...)):
@@ -90,32 +95,21 @@ async def upload_accounts(file: UploadFile = File(...)):
         content = await file.read()
         json_data = json.loads(content)
         asyncio.create_task(start_agents(json_data))
-        return {"status": "success", "message": f"Successfully loaded new accounts!"}
+        return {"status": "success", "message": "Successfully loaded accounts!"}
     except Exception as e:
         return {"status": "error", "message": f"Failed to load JSON: {str(e)}"}
 
 @app.on_event("startup")
 async def on_startup():
     """Smart detection for Local vs Railway startup."""
-    
-    # Deteksi Railway via environment variable bawaan Railway
     is_railway = os.environ.get("RAILWAY_ENVIRONMENT_ID") or os.environ.get("RAILWAY_STATIC_URL")
     
     if is_railway:
         logger.info("--- [ENVIRONMENT: RAILWAY] ---")
-        logger.info("Security Mode: Waiting for manual JSON upload via Dashboard.")
-        # Jangan load file lokal di Railway untuk keamanan ekstra
     else:
-        logger.info("--- [ENVIRONMENT: LOCAL / ARMBIAN] ---")
-        json_path = "mort_royal_bots_export.json"
-        if os.path.exists(json_path):
-            logger.info(f"Auto-load enabled: Found {json_path}")
-            asyncio.create_task(start_agents())
-        else:
-            logger.warning("Auto-load failed: 'mort_royal_bots_export.json' not found.")
-            logger.info("Waiting for manual upload via Dashboard...")
+        logger.info("--- [ENVIRONMENT: LOCAL] ---")
+        asyncio.create_task(start_agents())
 
 if __name__ == "__main__":
-    # Railway provides PORT env var
     port = int(os.environ.get("PORT", 5000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")

@@ -14,177 +14,92 @@
             --danger-color: #ef4444;
             --warning-color: #f59e0b;
         }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 20px;
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #334155;
-            padding-bottom: 10px;
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .card {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            padding: 15px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            transition: transform 0.2s;
-        }
-        .card:hover {
-            transform: translateY(-2px);
-        }
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            cursor: pointer;
-        }
-        .agent-name {
-            font-weight: bold;
-            font-size: 1.1em;
-            color: var(--accent-color);
-        }
-        .status-badge {
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 0.8em;
-            font-weight: bold;
-        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 10px; flex-wrap: wrap; gap: 10px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+        .card { background-color: var(--card-bg); border-radius: 8px; padding: 15px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); transition: transform 0.2s; }
+        .card:hover { transform: translateY(-2px); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; cursor: pointer; }
+        .agent-name { font-weight: bold; font-size: 1.1em; color: var(--accent-color); }
+        .status-badge { padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
         .status-playing { background-color: var(--success-color); color: #fff; }
-        .status-idle { background-color: var(--bg-color); color: #aaa; }
+        .status-idle { background-color: #334155; color: #aaa; }
         .status-dead { background-color: var(--danger-color); color: #fff; }
         .status-searching { background-color: var(--warning-color); color: #000; }
-        
-        .stats-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 5px;
-            font-size: 0.9em;
-        }
-        .hp-bar-bg {
-            background-color: #334155;
-            height: 6px;
-            border-radius: 3px;
-            overflow: hidden;
-            margin-top: 2px;
-        }
-        .hp-bar-fill {
-            height: 100%;
-            background-color: var(--success-color);
-            width: 0%;
-            transition: width 0.5s;
-        }
-        .logs {
-            background-color: #0f172a;
-            padding: 8px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 0.8em;
-            height: 80px;
-            overflow-y: auto;
-            margin-top: 10px;
-            color: #94a3b8;
-        }
-        .details {
-            display: none; /* Collapsed by default */
-        }
-        .details.open {
-            display: block;
-        }
-        .toggle-btn {
-            background: none;
-            border: none;
-            color: #94a3b8;
-            cursor: pointer;
-        }
+        .stats-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.9em; }
+        .hp-bar-bg { background-color: #334155; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 2px; }
+        .hp-bar-fill { height: 100%; background-color: var(--success-color); width: 0%; transition: width 0.5s; }
+        .logs { background-color: #0f172a; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 0.8em; height: 100px; overflow-y: auto; margin-top: 10px; color: #94a3b8; }
+        .details { display: none; margin-top: 15px; border-top: 1px solid #334155; padding-top: 10px; }
+        .details.open { display: block; }
+        .upload-box { background: #1e293b; padding: 8px; border-radius: 8px; border: 1px dashed #444; display: flex; align-items: center; gap: 5px; }
     </style>
-<div class="header">
-    <h1>MoltyBot Command Center</h1>
-    <div style="display: flex; gap: 10px; align-items: center;">
-        <!-- Proxy Panel -->
-        <div id="proxy-panel" style="background: #1e293b; padding: 10px; border-radius: 8px; border: 1px dashed #10b981;">
-            <input type="file" id="proxy-file" accept=".txt" style="font-size: 0.8em; color: white; width: 140px;">
-            <button onclick="uploadProxies()" style="background: #10b981; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em;">🛰️ Load Proxies</button>
+</head>
+<body>
+    <div class="header">
+        <h1>MoltyBot Command Center</h1>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <!-- Proxy Panel -->
+            <div class="upload-box" style="border-color: #10b981;">
+                <input type="file" id="proxy-file" accept=".txt" style="font-size: 0.7em; width: 130px; color: #aaa;">
+                <button onclick="uploadProxies()" style="background: #10b981; border: none; color: white; padding: 5px 8px; border-radius: 4px; cursor: pointer; font-size: 0.7em;">🛰️ Proxies</button>
+            </div>
+            <!-- Account Panel -->
+            <div class="upload-box" style="border-color: #3b82f6;">
+                <input type="file" id="json-file" accept=".json" style="font-size: 0.7em; width: 130px; color: #aaa;">
+                <button onclick="uploadJSON()" style="background: #3b82f6; border: none; color: white; padding: 5px 8px; border-radius: 4px; cursor: pointer; font-size: 0.7em;">🚀 Agents</button>
+            </div>
+            <div id="total-agents" style="background: #334155; padding: 8px 15px; border-radius: 8px; font-weight: bold;">Agents: 0</div>
         </div>
-        <!-- Account Panel -->
-        <div id="upload-panel" style="background: #1e293b; padding: 10px; border-radius: 8px; border: 1px dashed #3b82f6;">
-            <input type="file" id="json-file" accept=".json" style="font-size: 0.8em; color: white; width: 140px;">
-            <button onclick="uploadJSON()" style="background: #3b82f6; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em;">🚀 Load Agents</button>
-        </div>
-        <div id="total-agents" style="background: #334155; padding: 10px; border-radius: 8px;">Agents: 0</div>
     </div>
-</div>
-
-<script>
-    async function uploadProxies() {
-        const fileInput = document.getElementById('proxy-file');
-        if (fileInput.files.length === 0) {
-            alert("Please select a proxy (.txt) file first!");
-            return;
-        }
-        const formData = new FormData();
-        formData.append('file', fileInput.files[0]);
-        try {
-            const res = await fetch('/api/upload-proxies', { method: 'POST', body: formData });
-            const result = await res.json();
-            alert(result.message);
-            fileInput.value = '';
-        } catch (e) { alert("Proxy upload failed!"); }
-    }
-
-    async function uploadJSON() {
-...
+    
+    <div id="agent-grid" class="grid">
         <!-- Agents will be injected here -->
     </div>
 
     <script>
-        async function uploadJSON() {
-            const fileInput = document.getElementById('json-file');
-            if (fileInput.files.length === 0) {
-                alert("Please select a JSON file first!");
-                return;
-            }
-
+        async function uploadProxies() {
+            const fileInput = document.getElementById('proxy-file');
+            if (fileInput.files.length === 0) return alert("Select a .txt proxy file!");
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
-
             try {
-                const res = await fetch('/api/upload-accounts', {
-                    method: 'POST',
-                    body: formData
-                });
+                const res = await fetch('/api/upload-proxies', { method: 'POST', body: formData });
                 const result = await res.json();
                 alert(result.message);
-                fileInput.value = ''; // clear
-            } catch (e) {
-                alert("Upload failed!");
-                console.error(e);
-            }
+                fileInput.value = '';
+            } catch (e) { alert("Upload failed!"); }
         }
+
+        async function uploadJSON() {
+            const fileInput = document.getElementById('json-file');
+            if (fileInput.files.length === 0) return alert("Select a .json account file!");
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            try {
+                const res = await fetch('/api/upload-accounts', { method: 'POST', body: formData });
+                const result = await res.json();
+                alert(result.message);
+                fileInput.value = '';
+            } catch (e) { alert("Upload failed!"); }
+        }
+
         function getStatusClass(status) {
-            s = status.toLowerCase();
+            let s = status.toLowerCase();
             if (s.includes('playing') || s.includes('resuming')) return 'status-playing';
             if (s.includes('dead') || s.includes('finished')) return 'status-dead';
             if (s.includes('searching') || s.includes('waiting')) return 'status-searching';
             return 'status-idle';
         }
 
+        function toggleDetails(name) {
+            const el = document.getElementById(`details-${name}`);
+            el.classList.toggle('open');
+        }
+
         function createCard(agent) {
             const hpPct = Math.max(0, Math.min(100, agent.hp));
             const statusClass = getStatusClass(agent.status);
-            
             return `
                 <div class="card" id="card-${agent.name}">
                     <div class="card-header" onclick="toggleDetails('${agent.name}')">
@@ -196,64 +111,35 @@
                         </div>
                         <span class="status-badge ${statusClass}">${agent.status}</span>
                     </div>
-                    
-                    <div class="stats-row">
-                        <span>HP: ${agent.hp}</span>
-                        <span>EP: ${agent.ep}</span>
-                    </div>
-                    <div class="hp-bar-bg">
-                        <div class="hp-bar-fill" style="width: ${hpPct}%"></div>
-                    </div>
-                    
+                    <div class="stats-row"><span>HP: ${agent.hp}</span><span>EP: ${agent.ep}</span></div>
+                    <div class="hp-bar-bg"><div class="hp-bar-fill" style="width: ${hpPct}%"></div></div>
                     <div class="details" id="details-${agent.name}">
-                        <div class="stats-row" style="margin-top:10px">
-                            <span>Game: <a href="https://www.moltyroyale.com/games/${agent.game_id}" target="_blank" style="color:var(--accent-color); font-family:monospace; font-size:0.9em;">${agent.game_id.substring(0,8)}...</a></span>
+                        <div class="stats-row">
+                            <span>Game: <a href="https://www.moltyroyale.com/games/${agent.game_id}" target="_blank" style="color:var(--accent-color);">${agent.game_id.substring(0,8)}...</a></span>
                             <span>Region: ${agent.region}</span>
                         </div>
-                        <div class="stats-row">
-                            <span>Last Act: ${agent.last_action}</span>
-                            <span>Rewards: ${agent.rewards_today}</span>
-                        </div>
-                        <div class="logs">
-                            ${agent.logs.join('<br>')}
-                        </div>
+                        <div class="stats-row"><span>Last Act: ${agent.last_action}</span><span>Rewards: ${agent.rewards_today}</span></div>
+                        <div class="logs">${agent.logs.join('<br>')}</div>
                     </div>
                 </div>
             `;
-        }
-
-        function toggleDetails(name) {
-            const el = document.getElementById(`details-${name}`);
-            el.classList.toggle('open');
         }
 
         async function update() {
             try {
                 const res = await fetch('/api/stats');
                 const data = await res.json();
-                
                 document.getElementById('total-agents').innerText = `Agents: ${Object.keys(data).length}`;
-                
                 const grid = document.getElementById('agent-grid');
-                // Simple re-render strategy (can be optimized but fine for 20 agents)
-                // To preserve open/close state, we should update mostly.
-                
                 for (const [name, agent] of Object.entries(data)) {
                     const existingCard = document.getElementById(`card-${name}`);
                     if (existingCard) {
-                        // Update existing (hacky but works without React)
                         const wasOpen = document.getElementById(`details-${name}`).classList.contains('open');
                         existingCard.outerHTML = createCard(agent);
-                        if (wasOpen) {
-                            document.getElementById(`details-${name}`).classList.add('open');
-                        }
-                    } else {
-                        grid.innerHTML += createCard(agent);
-                    }
+                        if (wasOpen) document.getElementById(`details-${name}`).classList.add('open');
+                    } else { grid.innerHTML += createCard(agent); }
                 }
-            } catch (e) {
-                console.error("Fetch error", e);
-            }
+            } catch (e) { console.error("Update error", e); }
         }
 
         setInterval(update, 2000);
