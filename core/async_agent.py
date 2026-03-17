@@ -153,8 +153,17 @@ class AsyncAgent:
                 if e.code == "TOO_MANY_AGENTS_PER_IP":
                     await self.log("IP Limit (5/room) hit. Trying next...")
                 elif e.code == "ACCOUNT_ALREADY_IN_GAME":
-                    await self.log("Account already in game. Syncing...")
-                    return True
+                    # Ambil info game yang sedang berjalan agar tidak bengong
+                    acc = await self.api.get_account()
+                    current_games = acc.get("currentGames") or []
+                    if current_games:
+                        current = current_games[0]
+                        self.game_id = current.get("gameId")
+                        self.agent_id = current.get("agentId")
+                        await self.log(f"Already in game {self.game_id[:8]}. Syncing...")
+                        return True
+                    else:
+                        await self.log("Server says in game, but no active games found. Retrying hunt.")
                 return False
 
         except Exception as e:
@@ -236,8 +245,16 @@ class AsyncAgent:
                 )
 
                 if not is_alive or game_status == "finished":
-                    await self.log("Game Over / Died")
-                    rewards = res_obj.get("rewards", 0)
+                    # JIKA MATI TAPI GAME MASIH JALAN: Tunggu sampai SELESAI
+                    if not is_alive and game_status != "finished":
+                        Monitor.update(self.name, status="Dead (Watching)", hp=0)
+                        if turn_count % 5 == 0: # Log setiap 5 turn agar tidak spam
+                            await self.log(f"Eliminated. Waiting for game {self.game_id[:8]} to finish...")
+                        await asyncio.sleep(POLL_INTERVAL_DEAD)
+                        continue # Tetap di dalam play_game loop sampai status 'finished'
+
+                    # JIKA GAME BENAR-BENAR SELESAI: Keluar
+                    await self.log(f"Game Over. Rank: {res_obj.get('finalRank', '?')}, Rewards: {rewards}")
                     
                     # Update Win Ratio on Game End
                     try:
