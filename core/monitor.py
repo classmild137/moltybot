@@ -19,6 +19,8 @@ class Monitor:
             "region": "-",
             "hp": 100,
             "ep": 10,
+            "balance": 0,
+            "win_ratio": "0/0",
             "last_action": "-",
             "last_update": datetime.now().isoformat(),
             "rewards_today": 0,

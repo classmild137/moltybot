@@ -168,7 +168,9 @@
                     <div class="card-header" onclick="toggleDetails('${agent.name}')">
                         <div>
                             <div class="agent-name">${agent.name}</div>
-                            <div class="stats-row" style="font-size:0.8em; color:#94a3b8">${agent.wallet}</div>
+                            <div class="stats-row" style="font-size:0.8em; color:#94a3b8">
+                                ${agent.wallet} | 💰 ${agent.balance} | 🏆 ${agent.win_ratio}
+                            </div>
                         </div>
                         <span class="status-badge ${statusClass}">${agent.status}</span>
                     </div>
