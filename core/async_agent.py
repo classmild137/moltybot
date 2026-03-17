@@ -199,7 +199,14 @@ class AsyncAgent:
                     continue
 
                 # Get State
-                state_data = await self.api.get_state(self.game_id, self.agent_id)
+                try:
+                    state_data = await self.api.get_state(self.game_id, self.agent_id)
+                except APIError as e:
+                    if e.code in ("GAME_NOT_FOUND", "AGENT_NOT_FOUND"):
+                        await self.log(f"Game/Agent gone ({e.code}). Returning to hunt.")
+                        return # Keluar dari play_game dan kembali ke loop pencarian
+                    raise e # Lempar error lain ke except umum di bawah
+
                 if not state_data or not isinstance(state_data, dict):
                     await asyncio.sleep(5)
                     continue
