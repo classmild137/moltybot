@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from dashboard import app
 from core.async_agent import AsyncAgent
 from core.monitor import Monitor
+from core.proxy_manager import ProxyManager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -40,22 +41,34 @@ def load_accounts(json_data=None):
     return data if isinstance(data, list) else []
 
 async def start_agents(json_data=None):
-    """Startup or Hot-load agents with In-Memory Proxy Support."""
+    """Startup or Hot-load agents with Proxy Validation."""
     accounts = load_accounts(json_data)
     if not accounts:
         logger.warning("No accounts to load. Waiting for manual upload...")
         return
 
-    # Use proxies from memory or file
-    proxy_list = GLOBAL_PROXIES
-    if not proxy_list and os.path.exists("proxies.txt"):
+    global GLOBAL_PROXIES
+    # 1. Pilih sumber proxy
+    proxy_source = GLOBAL_PROXIES
+    if not proxy_source and os.path.exists("proxies.txt"):
         try:
             with open("proxies.txt", "r") as f:
-                proxy_list = [line.strip() for line in f if line.strip()]
-        except:
-            pass
+                proxy_source = [line.strip() for line in f if line.strip()]
+        except: pass
 
-    logger.info(f"Processing {len(accounts)} accounts with {len(proxy_list)} proxies...")
+    # 2. Jika tidak ada proxy sama sekali, coba scrape darurat
+    if not proxy_source:
+        logger.info("No proxies found. Emergency scraping initiated...")
+        proxy_source = await ProxyManager.scrape_free_proxies()
+
+    # 3. Test Proxy (Filter hanya yang hidup)
+    logger.info("Validating proxies against Molty Royale API...")
+    healthy_proxies = await ProxyManager.get_healthy_proxies(proxy_source, target_count=len(accounts))
+    
+    if not healthy_proxies:
+        logger.warning("NO HEALTHY PROXIES FOUND! Bots will attempt Direct connection.")
+
+    logger.info(f"Starting {len(accounts)} agents with {len(healthy_proxies)} working proxies.")
     
     for i, acc in enumerate(accounts):
         name = acc.get("name", f"Agent_{i}")
@@ -67,22 +80,21 @@ async def start_agents(json_data=None):
 
         if not key: continue
 
+        # Distribution logic: Max 5 bots per proxy
         proxy = None
         proxy_info = "Direct"
-        if proxy_list and i < (len(proxy_list) * 5):
-            proxy = proxy_list[i % len(proxy_list)]
-            p_parts = proxy.split('@')
-            proxy_info = p_parts[-1] if len(p_parts) > 1 else proxy
+        if healthy_proxies:
+            if i < (len(healthy_proxies) * 5):
+                proxy = healthy_proxies[i % len(healthy_proxies)]
+                proxy_info = proxy.split('@')[-1]
         
-        # Kirim index (i) ke AsyncAgent
         agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy, index=i)
         AGENTS.append(agent)
         RUNNING_AGENT_NAMES.add(name)
         
         Monitor.update(name, proxy=proxy_info, proxy_status="Connecting...")
-        
         asyncio.create_task(agent.start())
-        await asyncio.sleep(0.5) # Stagger start sedikit
+        await asyncio.sleep(0.5)
 
 @app.post("/api/upload-proxies")
 async def upload_proxies(file: UploadFile = File(...)):
@@ -92,7 +104,7 @@ async def upload_proxies(file: UploadFile = File(...)):
         text = content.decode('utf-8')
         GLOBAL_PROXIES = [line.strip() for line in text.split('\n') if line.strip()]
         logger.info(f"Loaded {len(GLOBAL_PROXIES)} proxies via API")
-        return {"status": "success", "message": f"Successfully loaded {len(GLOBAL_PROXIES)} proxies!"}
+        return {"status": "success", "message": f"Successfully loaded {len(GLOBAL_PROXIES)} proxies into queue. Start Agents to begin testing."}
     except Exception as e:
         return {"status": "error", "message": f"Failed to load proxies: {str(e)}"}
 
@@ -102,7 +114,7 @@ async def upload_accounts(file: UploadFile = File(...)):
         content = await file.read()
         json_data = json.loads(content)
         asyncio.create_task(start_agents(json_data))
-        return {"status": "success", "message": "Successfully loaded accounts!"}
+        return {"status": "success", "message": "Accounts loaded! Testing proxies and starting bots..."}
     except Exception as e:
         return {"status": "error", "message": f"Failed to load JSON: {str(e)}"}
 
@@ -110,11 +122,7 @@ async def upload_accounts(file: UploadFile = File(...)):
 async def on_startup():
     """Smart detection for Local vs Railway startup."""
     is_railway = os.environ.get("RAILWAY_ENVIRONMENT_ID") or os.environ.get("RAILWAY_STATIC_URL")
-    
-    if is_railway:
-        logger.info("--- [ENVIRONMENT: RAILWAY] ---")
-    else:
-        logger.info("--- [ENVIRONMENT: LOCAL] ---")
+    if not is_railway:
         asyncio.create_task(start_agents())
 
 if __name__ == "__main__":
