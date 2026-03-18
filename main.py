@@ -66,11 +66,16 @@ async def start_agents(json_data=None):
         proxy = None
         proxy_info = "Direct"
         if proxy_list:
-            # Gunakan IP ke-(i/5) agar setiap IP pegang max 5 bot
             proxy_idx = (i // 5) % len(proxy_list)
             proxy = proxy_list[proxy_idx]
-            proxy_info = proxy.split('/')[-1] # Tampilkan port saja untuk Tor
-
+            # Meringkas: Ambil bagian IP:Port saja, hilangkan user:pass
+            if "@" in proxy:
+                proxy_info = proxy.split('@')[-1]
+            elif "//" in proxy:
+                proxy_info = proxy.split('//')[-1]
+            else:
+                proxy_info = proxy
+        
         agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy, index=i)
         AGENTS.append(agent)
         RUNNING_AGENT_NAMES.add(name)
