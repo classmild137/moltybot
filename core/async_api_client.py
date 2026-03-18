@@ -11,11 +11,13 @@ class APIError(Exception):
         self.code = code
         super().__init__(f"[{code}] {message}")
 
+from aiohttp_socks import ProxyConnector
+
 class AsyncAPIClient:
     def __init__(self, base_url: str, api_key: str, proxy: str = None):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.proxy = proxy  # Format: "http://user:pass@host:port"
+        self.proxy = proxy  # Format: "http://...", "socks4://...", or "socks5://..."
         self.headers = {
             "Content-Type": "application/json",
             "X-API-Key": api_key
@@ -25,11 +27,19 @@ class AsyncAPIClient:
     async def _request(self, method: str, path: str, json: Dict = None, max_retries: int = 3) -> Any:
         url = f"{self.base_url}{path}"
         
+        # Buat connector sesuai jenis proxy
+        connector = None
+        if self.proxy:
+            try:
+                connector = ProxyConnector.from_url(self.proxy, ssl=False)
+            except Exception as e:
+                logger.error(f"Invalid proxy format: {self.proxy} ({e})")
+
         for attempt in range(max_retries):
             try:
-                # Menggunakan proxy jika tersedia
-                async with ClientSession(headers=self.headers, timeout=self.timeout) as session:
-                    async with session.request(method, url, json=json, proxy=self.proxy) as resp:
+                async with ClientSession(headers=self.headers, timeout=self.timeout, connector=connector) as session:
+                    # Parameter 'proxy' di request harus None jika kita pakai connector
+                    async with session.request(method, url, json=json) as resp:
                         # 1. Handle Rate Limit (429)
                         if resp.status == 429:
                             wait_time = 30 * (attempt + 1)
