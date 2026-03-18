@@ -154,17 +154,9 @@ class AsyncAgent:
                 if e.code == "TOO_MANY_AGENTS_PER_IP":
                     await self.log("IP Limit (5/room) hit. Trying next...")
                 elif e.code == "ACCOUNT_ALREADY_IN_GAME":
-                    # Ambil info game yang sedang berjalan agar tidak bengong
-                    acc = await self.api.get_account()
-                    current_games = acc.get("currentGames") or []
-                    if current_games:
-                        current = current_games[0]
-                        self.game_id = current.get("gameId")
-                        self.agent_id = current.get("agentId")
-                        await self.log(f"Already in game {self.game_id[:8]}. Syncing...")
-                        return True
-                    else:
-                        await self.log("Server says in game, but no active games found. Retrying hunt.")
+                    # Biarkan bot istirahat, jangan dipaksa sync jika kita sudah mati di sana
+                    await self.log("Still bound to a previous game. Waiting 30s for server to clear...")
+                    await asyncio.sleep(30)
                 return False
 
         except Exception as e:
@@ -265,24 +257,8 @@ class AsyncAgent:
                 )
 
                 if not is_alive or game_status == "finished":
-                    # JIKA MATI TAPI GAME MASIH JALAN: Tunggu sampai SELESAI
-                    if not is_alive and game_status != "finished":
-                        if watch_start_time == 0: watch_start_time = time.time()
-                        
-                        # Timeout 15 menit agar tidak stuck selamanya
-                        if time.time() - watch_start_time > 900:
-                            await self.log("Watch timeout (15m). Forcing new hunt.")
-                            self.game_id = None
-                            return
-
-                        Monitor.update(self.name, status="Dead (Watching)", hp=0)
-                        if turn_count % 5 == 0: # Log setiap 5 turn agar tidak spam
-                            await self.log(f"Eliminated. Waiting for game {self.game_id[:8]} to finish...")
-                        await asyncio.sleep(POLL_INTERVAL_DEAD)
-                        continue # Tetap di dalam play_game loop sampai status 'finished'
-
-                    # JIKA GAME BENAR-BENAR SELESAI: Keluar
-                    await self.log(f"Game Over. Rank: {res_obj.get('finalRank', '?')}, Rewards: {rewards}")
+                    # JIKA MATI ATAU GAME SELESAI: Langsung Keluar!
+                    await self.log(f"Game Session Ended (Alive: {is_alive}, Status: {game_status})")
                     
                     # Update Win Ratio on Game End
                     try:
@@ -294,12 +270,12 @@ class AsyncAgent:
                             )
                     except: pass
 
-                    Monitor.update(self.name, status="Dead/Finished", rewards_today=rewards)
+                    Monitor.update(self.name, status="Finished", rewards_today=res_obj.get("rewards", 0))
                     self.memory.end_game(
                         is_winner=res_obj.get("isWinner", False),
                         final_rank=res_obj.get("finalRank", 99),
                         final_hp=self_data.get("hp", 0),
-                        moltz_earned=rewards
+                        moltz_earned=res_obj.get("rewards", 0)
                     )
                     return
 
