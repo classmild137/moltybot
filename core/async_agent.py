@@ -41,19 +41,19 @@ class AsyncAgent:
     async def log(self, msg: str):
         Monitor.log(self.name, msg)
         logger.info(f"[{self.name}] {msg}")
-async def rotate_proxy(self):
-    """Request a new proxy from the manager if the current one fails."""
-    from core.proxy_manager import ProxyManager
-    new_p = ProxyManager.get_replacement(self.api.proxy)
-    if new_p:
-        await self.log(f"Proxy failed! Swapping to new IP...")
-        self.api.proxy = new_p
-        # Clean display info
-        p_info = new_p.split('@')[-1] if '@' in new_p else new_p.split('/')[-1]
-        Monitor.update(self.name, proxy=p_info, proxy_status="Reconnected")
-        return True
-    return False
 
+    async def rotate_proxy(self):
+        """Request a new proxy from the manager if the current one fails."""
+        from core.proxy_manager import ProxyManager
+        new_p = ProxyManager.get_replacement(self.api.proxy)
+        if new_p:
+            await self.log(f"Proxy failed! Swapping to new IP...")
+            self.api.proxy = new_p
+            # Clean display info
+            p_info = new_p.split('@')[-1] if '@' in new_p else new_p.split('/')[-1]
+            Monitor.update(self.name, proxy=p_info, proxy_status="Reconnected")
+            return True
+        return False
 
     async def start(self):
         """Main Agent Loop with Error Tolerance and Auto-Resume"""
@@ -139,6 +139,7 @@ async def rotate_proxy(self):
                     await self.log(f"Scan: {total_rooms} rooms found, 0 FREE. Retrying...")
                 return False
 
+            # Ambil room pertama yang tersedia
             target_game = free_games[0]
             gid = target_game["id"]
             await self.log(f"FOUND ROOM: {target_game.get('name')}! Joining...")
