@@ -35,6 +35,10 @@ class AsyncAgent:
         self.game_id: Optional[str] = None
         self.agent_id: Optional[str] = None
         self.running = True
+        
+        # Economy State
+        self.smoltz_balance = 0
+        self.moltz_balance = 0
 
         Monitor.register(self.name, self.wallet_address)
 
@@ -49,11 +53,28 @@ class AsyncAgent:
         if new_p:
             await self.log(f"Proxy failed! Swapping to new IP...")
             self.api.proxy = new_p
-            # Clean display info
             p_info = new_p.split('@')[-1] if '@' in new_p else new_p.split('/')[-1]
             Monitor.update(self.name, proxy=p_info, proxy_status="Reconnected")
             return True
         return False
+
+    async def update_economy_stats(self, account: dict):
+        """Parse and update economic stats."""
+        self.smoltz_balance = account.get("balance", 0) # Server balance
+        # Mencoba menebak field onchain balance, bisa 'moltz', 'walletBalance', atau 'chainBalance'
+        self.moltz_balance = account.get("moltz", account.get("walletBalance", 0))
+        
+        wins = account.get("totalWins", 0)
+        games = account.get("totalGames", 0)
+        
+        mode = "Hunting (Paid)" if self.smoltz_balance >= 100 else "Farming (Free)"
+        
+        Monitor.update(self.name, 
+            smoltz_balance=self.smoltz_balance,
+            moltz_balance=self.moltz_balance,
+            mode=mode,
+            win_ratio=f"{wins}/{games}"
+        )
 
     async def start(self):
         """Main Agent Loop with Error Tolerance and Auto-Resume"""
@@ -71,11 +92,7 @@ class AsyncAgent:
                 self.name = account.get("name", self.name)
                 Monitor.update(self.name, proxy_status="Success ✓")
                 
-                # Stats Update
-                balance = account.get("balance", 0)
-                wins = account.get("totalWins", 0)
-                games = account.get("totalGames", 0)
-                Monitor.update(self.name, balance=balance, win_ratio=f"{wins}/{games}")
+                await self.update_economy_stats(account)
                 
                 # Wallet check
                 server_wallet = account.get("walletAddress") or account.get("wallet")
@@ -92,7 +109,6 @@ class AsyncAgent:
                             await self.log(f"Resuming game {self.game_id[:8]}...")
                             Monitor.update(self.name, status="Resuming", game_id=self.game_id)
                             await self.play_game()
-                            # After play_game returns, continue the outer loop to find next game
                             break
                 else:
                     # No game to resume, go to hunting
@@ -116,7 +132,7 @@ class AsyncAgent:
                 continue
 
     async def find_and_join_game(self) -> bool:
-        """Dynamic sequential hunting using Global Throttle (max 1 search per 2s)."""
+        """Smart Hunting: Farm Free -> Hunt Paid (Offchain)"""
         Monitor.update(self.name, status="Waiting Queue", game_id="-", region="-", hp=100, ep=10)
         
         while not Monitor.can_search():
@@ -124,38 +140,75 @@ class AsyncAgent:
 
         Monitor.update(self.name, status="Searching")
         try:
+            # Refresh balance before deciding strategy
+            try:
+                acc = await self.api.get_account()
+                await self.update_economy_stats(acc)
+            except: pass
+
+            target_type = "paid" if self.smoltz_balance >= 100 else "free"
+            
             rooms = await self.api.list_games(status="waiting")
             Monitor.release_search()
 
             if rooms is None: return False
             
-            total_rooms = len(rooms) if isinstance(rooms, list) else 0
-            free_games = [g for g in rooms if g.get("entryType") == "free"] if isinstance(rooms, list) else []
+            if not isinstance(rooms, list): rooms = []
             
-            if not free_games:
+            # Filter rooms based on strategy
+            # Paid rooms are identified by entryType="paid" or entryFee > 0
+            candidate_games = []
+            
+            if target_type == "paid":
+                # Prioritize PAID rooms where we can pay with sMoltz (offchain)
+                candidate_games = [
+                    g for g in rooms 
+                    if g.get("entryType") == "paid" 
+                    or (g.get("entryFee", 0) > 0 and g.get("currency") == "smoltz")
+                ]
+                if not candidate_games:
+                    await self.log(f"Mode: Hunting. No PAID rooms found. Fallback to FREE.")
+                    target_type = "free" # Fallback
+            
+            if target_type == "free":
+                candidate_games = [g for g in rooms if g.get("entryType") == "free" or g.get("entryFee", 0) == 0]
+
+            if not candidate_games:
                 if not hasattr(self, "_scan_count"): self._scan_count = 0
                 self._scan_count += 1
                 if self._scan_count % 3 == 1:
-                    await self.log(f"Scan: {total_rooms} rooms found, 0 FREE. Retrying...")
+                    await self.log(f"Scan: {len(rooms)} rooms. No {target_type.upper()} rooms available.")
                 return False
 
-            # Ambil room pertama yang tersedia
-            target_game = free_games[0]
+            # Pick the best room (e.g. most crowded to start sooner, or random)
+            target_game = candidate_games[0]
             gid = target_game["id"]
-            await self.log(f"FOUND ROOM: {target_game.get('name')}! Joining...")
+            g_name = target_game.get('name')
+            await self.log(f"FOUND {target_type.upper()} ROOM: {g_name}! Joining...")
             
             try:
+                # If paid, API might need specific flag or just deduction happens automatically on server side
+                # Standard endpoint usually handles it if balance is sufficient
                 agent = await self.api.register_agent(gid, self.name)
                 self.game_id = gid
                 self.agent_id = agent["id"]
                 await self.log("Joined successfully!")
                 return True
             except APIError as e:
-                if e.code == "TOO_MANY_AGENTS_PER_IP":
+                if e.code == "INSUFFICIENT_BALANCE":
+                    await self.log("Not enough sMoltz for Paid room. Switching to Farming.")
+                    self.smoltz_balance = 0 # Force update locally to prevent loop
+                    return False
+                elif e.code == "TOO_MANY_AGENTS_PER_IP":
                     await self.log("IP Limit (5/room) hit. Trying next...")
                 elif e.code == "ACCOUNT_ALREADY_IN_GAME":
                     await self.log("Syncing existing game...")
                     return True
+                elif e.code == "AGENT_NOT_WHITELISTED":
+                    await self.log("Not Whitelisted for Paid. Fallback to Farming.")
+                    self.smoltz_balance = -1 # Prevent retrying paid for a while
+                else:
+                    await self.log(f"Join failed: {e.code}")
                 return False
 
         except Exception as e:
@@ -228,10 +281,7 @@ class AsyncAgent:
                     try:
                         acc_info = await self.api.get_account()
                         if acc_info:
-                            Monitor.update(self.name, 
-                                balance=acc_info.get("balance", 0),
-                                win_ratio=f"{acc_info.get('totalWins', 0)}/{acc_info.get('totalGames', 0)}"
-                            )
+                            await self.update_economy_stats(acc_info)
                     except: pass
                     
                     self.memory.end_game(

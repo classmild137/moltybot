@@ -38,7 +38,10 @@ class Monitor:
             "region": "-",
             "hp": 100,
             "ep": 10,
-            "balance": 0,
+            "smoltz_balance": 0,
+            "moltz_balance": 0,
+            "mode": "Farming", # Farming (Free) or Hunting (Paid)
+            "balance": 0, # Legacy field, kept for compatibility
             "win_ratio": "0/0",
             "proxy": "-",
             "proxy_status": "Direct",

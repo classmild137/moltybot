@@ -104,20 +104,27 @@
                 `<span style="color:var(--warning-color)">🛰️ Direct</span>` : 
                 `<span style="color:var(--success-color)">🛰️ ${agent.proxy}</span>`;
             
+            const modeColor = agent.mode && agent.mode.includes('Hunting') ? '#f59e0b' : '#10b981';
+
             return `
                 <div class="card" id="card-${agent.name}">
                     <div class="card-header" onclick="toggleDetails('${agent.name}')">
                         <div>
                             <div class="agent-name">${agent.name}</div>
                             <div class="stats-row" style="font-size:0.8em; color:#94a3b8">
-                                ${agent.wallet} | 💰 ${agent.balance} | 🏆 ${agent.win_ratio}
+                                💰 sMoltz: <span style="color:#fff">${agent.smoltz_balance}</span> | 
+                                🏦 Moltz: <span style="color:#fff">${agent.moltz_balance}</span>
                             </div>
                         </div>
                         <span class="status-badge ${statusClass}">${agent.status}</span>
                     </div>
                     <div class="stats-row">
-                        <span>HP: ${agent.hp} | EP: ${agent.ep}</span>
+                        <span style="color:${modeColor}; font-weight:bold;">${agent.mode || 'Farming'}</span>
                         <span style="font-size:0.8em">${proxyLabel} [${agent.proxy_status}]</span>
+                    </div>
+                    <div class="stats-row" style="margin-top:5px">
+                        <span>HP: ${agent.hp} | EP: ${agent.ep}</span>
+                        <span>Win: ${agent.win_ratio}</span>
                     </div>
                     <div class="hp-bar-bg"><div class="hp-bar-fill" style="width: ${hpPct}%"></div></div>
                     <div class="details" id="details-${agent.name}">
