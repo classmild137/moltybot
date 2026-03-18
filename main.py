@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import uvicorn
+import socket
 from typing import List
 from fastapi import UploadFile, File, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -22,72 +23,54 @@ AGENTS: List[AsyncAgent] = []
 RUNNING_AGENT_NAMES = set()
 GLOBAL_PROXIES = []
 
-def load_accounts(json_data=None):
-    """Load accounts from file or raw JSON data"""
-    if json_data:
-        data = json_data
-    else:
-        json_path = "mort_royal_bots_export.json"
-        if not os.path.exists(json_path):
-            return []
-        try:
-            with open(json_path, 'r') as f:
-                data = json.load(f)
-        except:
-            return []
-
-    if isinstance(data, dict) and "accounts" in data:
-        data = data["accounts"]
-    return data if isinstance(data, list) else []
+def check_local_tor():
+    """Detect if local Tor multi-instances (9050-9060) are active."""
+    tor_proxies = []
+    for port in range(9050, 9061):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.1)
+            if s.connect_ex(('127.0.0.1', port)) == 0:
+                tor_proxies.append(f"socks5://127.0.0.1:{port}")
+    return tor_proxies
 
 async def start_agents(json_data=None):
-    """Startup or Hot-load agents with Proxy Validation."""
+    """Startup with Auto-Tor and Proxy Validation."""
     accounts = load_accounts(json_data)
     if not accounts:
         logger.warning("No accounts to load. Waiting for manual upload...")
         return
 
-    global GLOBAL_PROXIES
-    # 1. Pilih sumber proxy
-    proxy_source = GLOBAL_PROXIES
-    if not proxy_source and os.path.exists("proxies.txt"):
-        try:
-            with open("proxies.txt", "r") as f:
-                proxy_source = [line.strip() for line in f if line.strip()]
-        except: pass
-
-    # 2. Jika tidak ada proxy sama sekali, coba scrape darurat
-    if not proxy_source:
-        logger.info("No proxies found. Emergency scraping initiated...")
-        proxy_source = await ProxyManager.scrape_free_proxies()
-
-    # 3. Test Proxy (Filter hanya yang hidup)
-    logger.info("Validating proxies against Molty Royale API...")
-    healthy_proxies = await ProxyManager.get_healthy_proxies(proxy_source, target_count=len(accounts))
+    # 1. Prioritas: Gunakan Tor Lokal (Jika di Armbian)
+    proxy_list = check_local_tor()
     
-    if not healthy_proxies:
-        logger.warning("NO HEALTHY PROXIES FOUND! Bots will attempt Direct connection.")
+    # 2. Alternatif: Gunakan Proxy yang di-upload
+    if not proxy_list and GLOBAL_PROXIES:
+        proxy_list = await ProxyManager.get_healthy_proxies(GLOBAL_PROXIES, target_count=len(accounts))
+    
+    # 3. Alternatif Terakhir: Scrape otomatis (Jika di Railway)
+    if not proxy_list:
+        logger.info("No local Tor or uploaded proxies. Scraping public proxies...")
+        proxy_list = await ProxyManager.get_healthy_proxies(target_count=len(accounts))
 
-    logger.info(f"Starting {len(accounts)} agents with {len(healthy_proxies)} working proxies.")
+    logger.info(f"Using {len(proxy_list)} different IPs for {len(accounts)} agents.")
     
     for i, acc in enumerate(accounts):
         name = acc.get("name", f"Agent_{i}")
-        if name in RUNNING_AGENT_NAMES:
-            continue
+        if name in RUNNING_AGENT_NAMES: continue
 
         key = acc.get("apikey") or acc.get("api_key") or acc.get("key")
         wallet = acc.get("walletaddress") or acc.get("wallet_address") or acc.get("wallet")
-
         if not key: continue
 
-        # Distribution logic: Max 5 bots per proxy
+        # Logic: Max 5 bots per IP
         proxy = None
         proxy_info = "Direct"
-        if healthy_proxies:
-            if i < (len(healthy_proxies) * 5):
-                proxy = healthy_proxies[i % len(healthy_proxies)]
-                proxy_info = proxy.split('@')[-1]
-        
+        if proxy_list:
+            # Gunakan IP ke-(i/5) agar setiap IP pegang max 5 bot
+            proxy_idx = (i // 5) % len(proxy_list)
+            proxy = proxy_list[proxy_idx]
+            proxy_info = proxy.split('/')[-1] # Tampilkan port saja untuk Tor
+
         agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy, index=i)
         AGENTS.append(agent)
         RUNNING_AGENT_NAMES.add(name)
@@ -103,10 +86,9 @@ async def upload_proxies(file: UploadFile = File(...)):
         content = await file.read()
         text = content.decode('utf-8')
         GLOBAL_PROXIES = [line.strip() for line in text.split('\n') if line.strip()]
-        logger.info(f"Loaded {len(GLOBAL_PROXIES)} proxies via API")
-        return {"status": "success", "message": f"Successfully loaded {len(GLOBAL_PROXIES)} proxies into queue. Start Agents to begin testing."}
+        return {"status": "success", "message": f"{len(GLOBAL_PROXIES)} proxies queued."}
     except Exception as e:
-        return {"status": "error", "message": f"Failed to load proxies: {str(e)}"}
+        return {"status": "error", "message": str(e)}
 
 @app.post("/api/upload-accounts")
 async def upload_accounts(file: UploadFile = File(...)):
@@ -114,15 +96,30 @@ async def upload_accounts(file: UploadFile = File(...)):
         content = await file.read()
         json_data = json.loads(content)
         asyncio.create_task(start_agents(json_data))
-        return {"status": "success", "message": "Accounts loaded! Testing proxies and starting bots..."}
+        return {"status": "success", "message": "Starting bots..."}
     except Exception as e:
-        return {"status": "error", "message": f"Failed to load JSON: {str(e)}"}
+        return {"status": "error", "message": str(e)}
+
+def load_accounts(json_data=None):
+    if json_data: return json_data
+    json_path = "mort_royal_bots_export.json"
+    if os.path.exists(json_path):
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+            return data.get("accounts", data) if isinstance(data, dict) else data
+    return []
 
 @app.on_event("startup")
 async def on_startup():
     """Smart detection for Local vs Railway startup."""
     is_railway = os.environ.get("RAILWAY_ENVIRONMENT_ID") or os.environ.get("RAILWAY_STATIC_URL")
-    if not is_railway:
+    
+    if is_railway:
+        logger.info("--- [ENVIRONMENT: RAILWAY + TOR DOCKER] ---")
+        # Beri waktu tambahan agar Tor benar-benar konek (100%)
+        await asyncio.sleep(10)
+    else:
+        logger.info("--- [ENVIRONMENT: LOCAL / ARMBIAN] ---")
         asyncio.create_task(start_agents())
 
 if __name__ == "__main__":

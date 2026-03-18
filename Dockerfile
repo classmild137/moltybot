@@ -1,26 +1,27 @@
-# Gunakan base image Python 3.10 versi slim agar ukurannya lebih ringan
+# Gunakan Python Image
 FROM python:3.10-slim
 
-# Set zona waktu jika diperlukan dan kurangi logs yang tidak perlu dari Python
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONFAULTHANDLER=1 \
-    PIP_NO_CACHE_DIR=off \
-    PIP_DISABLE_PIP_VERSION_CHECK=on
+# Install Tor dan dependensi sistem
+RUN apt-get update && apt-get install -y tor socket procps && rm -rf /var/lib/apt/lists/*
 
-# Set working directory di dalam container
+# Setup working directory
 WORKDIR /app
 
-# Copy requirement pertama untuk memanfaatkan docker cache
+# Copy requirements dan install
 COPY requirements.txt .
-
-# Install dependencies yang dibutuhkan
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy semua source code aplikasi ke dalam container
+# Copy seluruh project
 COPY . .
 
-# Buat direktori data dan logs yang dibutuhkan oleh bot agar tidak error jika tidak ada
-RUN mkdir -p data logs
+# Buat script untuk menjalankan 11 port Tor secara otomatis
+RUN echo '#!/bin/bash\n\
+for i in {9050..9060}; do\n\
+  echo "SocksPort 0.0.0.0:$i" >> /etc/tor/torrc\n\
+done\n\
+tor -f /etc/tor/torrc &\n\
+sleep 15\n\
+python main.py' > entrypoint.sh && chmod +x entrypoint.sh
 
-# Jalankan bot
-CMD ["python", "main.py"]
+# Jalankan via entrypoint
+CMD ["./entrypoint.sh"]
