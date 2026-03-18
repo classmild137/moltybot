@@ -63,6 +63,8 @@ class ProxyManager:
         except:
             return False
 
+    _healthy_pool: List[str] = []
+
     @classmethod
     async def get_healthy_proxies(cls, custom_list=None, target_count=55):
         """Intelligent filtering: test until target count is reached."""
@@ -70,13 +72,11 @@ class ProxyManager:
         if not raw_list: return []
 
         logger.info(f"Validating proxies... Target: {target_count}")
-        healthy = []
+        new_healthy = []
         
-        # Shuffle agar tidak selalu mencoba proxy yang sama di setiap restart
         import random
         random.shuffle(raw_list)
 
-        # Test in small batches to be efficient
         batch_size = 25
         for i in range(0, len(raw_list), batch_size):
             batch = raw_list[i:i+batch_size]
@@ -85,14 +85,20 @@ class ProxyManager:
             
             for idx, is_ok in enumerate(results):
                 if is_ok:
-                    healthy.append(batch[idx])
-                    if len(healthy) >= target_count: break
+                    new_healthy.append(batch[idx])
+                    if len(new_healthy) >= target_count + 20: break # Simpan cadangan 20
             
-            logger.info(f"Progress: {len(healthy)}/{target_count} healthy proxies found...")
-            if len(healthy) >= target_count: break
-            
-            # Anti-flood local network
+            if len(new_healthy) >= target_count: break
             await asyncio.sleep(0.5)
 
-        logger.info(f"Validation complete. Total healthy: {len(healthy)}")
-        return healthy
+        cls._healthy_pool = new_healthy
+        return new_healthy[:target_count]
+
+    @classmethod
+    def get_replacement(cls, old_proxy: str) -> str:
+        """Get a fresh proxy from the pool if available."""
+        if not cls._healthy_pool: return None
+        # Ambil secara acak dari pool yang ada
+        import random
+        new_p = random.choice(cls._healthy_pool)
+        return new_p if new_p != old_proxy else None
