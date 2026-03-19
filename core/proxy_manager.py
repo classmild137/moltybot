@@ -68,31 +68,15 @@ class ProxyManager:
     @classmethod
     async def get_healthy_proxies(cls, custom_list=None, target_count=55):
         """Intelligent filtering: test until target count is reached."""
-        raw_list = custom_list if custom_list else await cls.scrape_free_proxies()
+        if custom_list:
+            # JIKA USER UPLOAD MANUAL: Kita percayai pilihan user (bypass test berat)
+            logger.info(f"Using {len(custom_list)} user-provided proxies.")
+            cls._healthy_pool = custom_list
+            return custom_list[:target_count]
+
+        # JIKA SCRAPE OTOMATIS: Tetap lakukan testing ketat
+        raw_list = await cls.scrape_free_proxies()
         if not raw_list: return []
-
-        logger.info(f"Validating proxies... Target: {target_count}")
-        new_healthy = []
-        
-        import random
-        random.shuffle(raw_list)
-
-        batch_size = 25
-        for i in range(0, len(raw_list), batch_size):
-            batch = raw_list[i:i+batch_size]
-            tasks = [cls.test_proxy(p) for p in batch]
-            results = await asyncio.gather(*tasks)
-            
-            for idx, is_ok in enumerate(results):
-                if is_ok:
-                    new_healthy.append(batch[idx])
-                    if len(new_healthy) >= target_count + 20: break # Simpan cadangan 20
-            
-            if len(new_healthy) >= target_count: break
-            await asyncio.sleep(0.5)
-
-        cls._healthy_pool = new_healthy
-        return new_healthy[:target_count]
 
     @classmethod
     def get_replacement(cls, old_proxy: str) -> str:

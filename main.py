@@ -106,8 +106,19 @@ async def upload_proxies(file: UploadFile = File(...)):
     try:
         content = await file.read()
         text = content.decode('utf-8')
-        GLOBAL_PROXIES = [line.strip() for line in text.split('\n') if line.strip()]
-        return {"status": "success", "message": f"{len(GLOBAL_PROXIES)} proxies queued."}
+        raw_lines = [line.strip() for line in text.split('\n') if line.strip()]
+        
+        processed = []
+        for line in raw_lines:
+            # Jika tidak diawali http atau socks, tambahkan http:// secara otomatis
+            if not line.startswith(('http', 'socks')):
+                processed.append(f"http://{line}")
+            else:
+                processed.append(line)
+                
+        GLOBAL_PROXIES = processed
+        logger.info(f"Received {len(GLOBAL_PROXIES)} proxies via Dashboard.")
+        return {"status": "success", "message": f"{len(GLOBAL_PROXIES)} proxies received. Protocol fixed."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
