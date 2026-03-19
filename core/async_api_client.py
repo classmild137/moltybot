@@ -27,19 +27,27 @@ class AsyncAPIClient:
     async def _request(self, method: str, path: str, json: Dict = None, max_retries: int = 3) -> Any:
         url = f"{self.base_url}{path}"
         
-        # Buat connector sesuai jenis proxy
-        connector = None
-        if self.proxy:
+        # Ekstrak Auth jika ada format user:pass@host:port
+        proxy_auth = None
+        proxy_url = self.proxy
+        
+        if self.proxy and "@" in self.proxy:
             try:
-                connector = ProxyConnector.from_url(self.proxy, ssl=False)
+                # Pisahkan proto://user:pass@host:port
+                proto, rest = self.proxy.split("://")
+                auth_part, host_part = rest.split("@")
+                user, password = auth_part.split(":")
+                
+                proxy_url = f"{proto}://{host_part}"
+                proxy_auth = aiohttp.BasicAuth(user, password)
             except Exception as e:
-                logger.error(f"Invalid proxy format: {self.proxy} ({e})")
+                logger.error(f"Proxy parse error: {e}")
 
         for attempt in range(max_retries):
             try:
-                async with ClientSession(headers=self.headers, timeout=self.timeout, connector=connector) as session:
-                    # Parameter 'proxy' di request harus None jika kita pakai connector
-                    async with session.request(method, url, json=json) as resp:
+                async with ClientSession(headers=self.headers, timeout=self.timeout) as session:
+                    # Kirim request dengan proxy_url dan proxy_auth yang sudah dipisah
+                    async with session.request(method, url, json=json, proxy=proxy_url, proxy_auth=proxy_auth) as resp:
                         # 1. Handle Rate Limit (429)
                         if resp.status == 429:
                             wait_time = 30 * (attempt + 1)
