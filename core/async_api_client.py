@@ -3,6 +3,7 @@ import asyncio
 import logging
 from typing import Optional, Dict, Any, List
 from aiohttp import ClientTimeout, ClientSession
+from aiohttp_socks import ProxyConnector
 
 logger = logging.getLogger("MoltyBot.AsyncAPI")
 
@@ -11,13 +12,11 @@ class APIError(Exception):
         self.code = code
         super().__init__(f"[{code}] {message}")
 
-from aiohttp_socks import ProxyConnector
-
 class AsyncAPIClient:
     def __init__(self, base_url: str, api_key: str, proxy: str = None):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.proxy = proxy  # Format: "http://...", "socks4://...", or "socks5://..."
+        self.proxy = proxy  # Format: "http://user:pass@host:port"
         self.headers = {
             "Content-Type": "application/json",
             "X-API-Key": api_key
@@ -27,57 +26,40 @@ class AsyncAPIClient:
     async def _request(self, method: str, path: str, json: Dict = None, max_retries: int = 3) -> Any:
         url = f"{self.base_url}{path}"
         
-        # Ekstrak Auth jika ada format user:pass@host:port
-        proxy_auth = None
-        proxy_url = self.proxy
-        
-        if self.proxy and "@" in self.proxy:
+        # Gunakan ProxyConnector untuk menangani semua jenis proxy (HTTP/SOCKS) secara otomatis
+        connector = None
+        if self.proxy:
             try:
-                # Pisahkan proto://user:pass@host:port
-                proto, rest = self.proxy.split("://")
-                auth_part, host_part = rest.split("@")
-                user, password = auth_part.split(":")
-                
-                proxy_url = f"{proto}://{host_part}"
-                proxy_auth = aiohttp.BasicAuth(user, password)
+                connector = ProxyConnector.from_url(self.proxy, ssl=False)
             except Exception as e:
-                logger.error(f"Proxy parse error: {e}")
+                logger.error(f"Proxy Connector Error: {e}")
 
         for attempt in range(max_retries):
             try:
-                async with ClientSession(headers=self.headers, timeout=self.timeout) as session:
-                    # Kirim request dengan proxy_url dan proxy_auth yang sudah dipisah
-                    async with session.request(method, url, json=json, proxy=proxy_url, proxy_auth=proxy_auth) as resp:
-                        # 1. Handle Rate Limit (429)
+                async with ClientSession(headers=self.headers, timeout=self.timeout, connector=connector) as session:
+                    async with session.request(method, url, json=json) as resp:
                         if resp.status == 429:
                             wait_time = 30 * (attempt + 1)
-                            logger.warning(f"Rate Limit (429) hit! Cooling down for {wait_time}s...")
                             await asyncio.sleep(wait_time)
                             continue
 
-                        # 2. Handle Unauthorized (401)
                         if resp.status == 401:
-                            raise APIError("Invalid API Key (Unauthorized)", "UNAUTHORIZED")
+                            raise APIError("Invalid API Key", "UNAUTHORIZED")
                             
                         try:
                             response_json = await resp.json()
                         except:
                             text = await resp.text()
-                            if "Cloudflare" in text or "challenge" in text:
-                                logger.error("IP Blocked or Challenged by Cloudflare/WAF!")
-                                await asyncio.sleep(60) # Heavy wait
                             if attempt < max_retries - 1:
                                 await asyncio.sleep(2)
                                 continue
-                            raise APIError(f"Invalid JSON/HTML: {text[:50]}", "SERVER_ERROR")
+                            raise APIError(f"Invalid Response: {text[:50]}", "SERVER_ERROR")
 
                         if not response_json.get("success", False):
                             error = response_json.get("error", {})
                             code = error.get("code", "UNKNOWN")
-                            # Ambil pesan error asli dari server jika ada
-                            msg = error.get("message") or response_json.get("message") or "API returned success: false"
+                            msg = error.get("message") or response_json.get("message") or "API Error"
                             
-                            # Fatal errors
                             fatal = ("AGENT_NOT_FOUND", "GAME_NOT_FOUND", "UNAUTHORIZED")
                             if code in fatal:
                                 raise APIError(msg, code)
@@ -87,7 +69,6 @@ class AsyncAPIClient:
                                 continue
                             raise APIError(msg, code)
                         
-                        # Kadang data ada di field 'data', kadang langsung di root
                         data = response_json.get("data")
                         return data if data is not None else response_json
 
