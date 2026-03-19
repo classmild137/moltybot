@@ -43,25 +43,24 @@ async def start_agents(json_data=None):
     global GLOBAL_PROXIES
     proxy_list = []
 
-    # 1. Prioritas Utama: Tor Lokal (Jika di Armbian/Docker)
-    proxy_list = check_local_tor()
-    if proxy_list:
-        logger.info(f"Using {len(proxy_list)} local Tor instances.")
-
-    # 2. Prioritas Kedua: Manual Upload via Dashboard
-    if not proxy_list and GLOBAL_PROXIES:
-        logger.info("Using proxies uploaded via Dashboard.")
+    # 1. Prioritas 1: Manual Upload via Dashboard (Paling Penting)
+    if GLOBAL_PROXIES:
+        logger.info(f"Dashboard Proxies detected: {len(GLOBAL_PROXIES)} IPs.")
         proxy_list = await ProxyManager.get_healthy_proxies(GLOBAL_PROXIES, target_count=len(accounts))
 
-    # 3. Prioritas Ketiga: File proxies.txt di folder
+    # 2. Prioritas 2: Tor Lokal (Jika di Armbian/Docker)
+    if not proxy_list:
+        proxy_list = check_local_tor()
+        if proxy_list: logger.info(f"Using {len(proxy_list)} local Tor instances.")
+
+    # 3. Prioritas 3: File proxies.txt di folder
     if not proxy_list and os.path.exists("proxies.txt"):
         logger.info("Using proxies from local proxies.txt file.")
         try:
             with open("proxies.txt", "r") as f:
                 lines = [line.strip() for line in f if line.strip()]
                 proxy_list = await ProxyManager.get_healthy_proxies(lines, target_count=len(accounts))
-        except Exception as e:
-            logger.error(f"Failed to read proxies.txt: {e}")
+        except: pass
 
     # 4. Alternatif Terakhir: Scrape otomatis (Jika semua di atas kosong)
     if not proxy_list:

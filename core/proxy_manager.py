@@ -67,36 +67,14 @@ class ProxyManager:
 
     @classmethod
     async def get_healthy_proxies(cls, custom_list=None, target_count=55):
-        """Filter and return only working proxies with fallback to scraper."""
-        to_test = custom_list if custom_list else await cls.scrape_free_proxies()
-        
-        if not to_test: return []
+        """Filter and return working proxies. Trusts manual lists immediately."""
+        if custom_list and len(custom_list) > 0:
+            logger.info(f"Manual Mode: Trusting {len(custom_list)} user proxies.")
+            cls._healthy_pool = custom_list
+            return custom_list # Kirim semua, biar bot yang rotasi sendiri
 
-        logger.info(f"Validating {len(to_test)} proxies... Target: {target_count}")
-        healthy = []
-        
-        # Test in parallel batches
-        batch_size = 30
-        for i in range(0, len(to_test), batch_size):
-            batch = to_test[i:i+batch_size]
-            tasks = [cls.test_proxy(p) for p in batch]
-            results = await asyncio.gather(*tasks)
-            
-            for idx, is_ok in enumerate(results):
-                if is_ok:
-                    healthy.append(batch[idx])
-                    if len(healthy) >= target_count + 10: break
-            
-            if len(healthy) >= target_count: break
-            await asyncio.sleep(0.1)
-
-        # Fallback: Jika list dari user (custom_list) ternyata zonk/mati semua
-        if custom_list and len(healthy) < 5:
-            logger.warning("Manual proxies failed validation. Falling back to Scraper...")
-            return await cls.get_healthy_proxies(custom_list=None, target_count=target_count)
-
-        cls._healthy_pool = healthy
-        return healthy[:target_count]
+        # JIKA SCRAPE OTOMATIS: Lakukan testing
+        raw_list = await cls.scrape_free_proxies()
 
     @classmethod
     def get_replacement(cls, old_proxy: str) -> str:
