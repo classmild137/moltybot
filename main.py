@@ -34,22 +34,38 @@ def check_local_tor():
     return tor_proxies
 
 async def start_agents(json_data=None):
-    """Startup with Auto-Tor and Proxy Validation."""
+    """Startup with Auto-Tor, Local File, and Proxy Validation."""
     accounts = load_accounts(json_data)
     if not accounts:
         logger.warning("No accounts to load. Waiting for manual upload...")
         return
 
-    # 1. Prioritas: Gunakan Tor Lokal (Jika di Armbian)
+    global GLOBAL_PROXIES
+    proxy_list = []
+
+    # 1. Prioritas Utama: Tor Lokal (Jika di Armbian/Docker)
     proxy_list = check_local_tor()
-    
-    # 2. Alternatif: Gunakan Proxy yang di-upload
+    if proxy_list:
+        logger.info(f"Using {len(proxy_list)} local Tor instances.")
+
+    # 2. Prioritas Kedua: Manual Upload via Dashboard
     if not proxy_list and GLOBAL_PROXIES:
+        logger.info("Using proxies uploaded via Dashboard.")
         proxy_list = await ProxyManager.get_healthy_proxies(GLOBAL_PROXIES, target_count=len(accounts))
-    
-    # 3. Alternatif Terakhir: Scrape otomatis (Jika di Railway)
+
+    # 3. Prioritas Ketiga: File proxies.txt di folder
+    if not proxy_list and os.path.exists("proxies.txt"):
+        logger.info("Using proxies from local proxies.txt file.")
+        try:
+            with open("proxies.txt", "r") as f:
+                lines = [line.strip() for line in f if line.strip()]
+                proxy_list = await ProxyManager.get_healthy_proxies(lines, target_count=len(accounts))
+        except Exception as e:
+            logger.error(f"Failed to read proxies.txt: {e}")
+
+    # 4. Alternatif Terakhir: Scrape otomatis (Jika semua di atas kosong)
     if not proxy_list:
-        logger.info("No local Tor or uploaded proxies. Scraping public proxies...")
+        logger.info("No local Tor, file, or uploaded proxies. Scraping public proxies...")
         proxy_list = await ProxyManager.get_healthy_proxies(target_count=len(accounts))
 
     logger.info(f"Using {len(proxy_list)} different IPs for {len(accounts)} agents.")
