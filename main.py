@@ -110,15 +110,27 @@ async def upload_proxies(file: UploadFile = File(...)):
         
         processed = []
         for line in raw_lines:
-            # Jika tidak diawali http atau socks, tambahkan http:// secara otomatis
-            if not line.startswith(('http', 'socks')):
-                processed.append(f"http://{line}")
+            # Format Detective: IP:PORT:USER:PASS (4 bagian)
+            parts = line.split(':')
+            if len(parts) == 4:
+                ip, port, user, pw = parts
+                processed.append(f"http://{user}:{pw}@{ip}:{port}")
+            # Format Detective: USER:PASS@IP:PORT (sudah ada @)
+            elif "@" in line:
+                if not line.startswith(('http', 'socks')):
+                    processed.append(f"http://{line}")
+                else:
+                    processed.append(line)
+            # Format Default / Lainnya
             else:
-                processed.append(line)
+                if not line.startswith(('http', 'socks')):
+                    processed.append(f"http://{line}")
+                else:
+                    processed.append(line)
                 
         GLOBAL_PROXIES = processed
-        logger.info(f"Received {len(GLOBAL_PROXIES)} proxies via Dashboard.")
-        return {"status": "success", "message": f"{len(GLOBAL_PROXIES)} proxies received. Protocol fixed."}
+        logger.info(f"Received {len(GLOBAL_PROXIES)} proxies. Smart format applied.")
+        return {"status": "success", "message": f"{len(GLOBAL_PROXIES)} proxies loaded and formatted!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
