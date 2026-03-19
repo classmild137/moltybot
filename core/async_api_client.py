@@ -63,10 +63,13 @@ class AsyncAPIClient:
                     try:
                         data = await resp.json()
                     except:
+                        text = await resp.text()
                         if attempt < max_retries - 1:
                             await asyncio.sleep(2)
                             continue
-                        raise APIError("Invalid JSON response", "SERVER_ERROR")
+                        # Potong teks agar tidak merusak dashboard, tapi cukup untuk dibaca
+                        debug_msg = text[:60].replace("\n", " ")
+                        raise APIError(f"Invalid JSON: {debug_msg}", "SERVER_ERROR")
 
                     if not data.get("success", False):
                         code = data.get("error", {}).get("code", "UNKNOWN")

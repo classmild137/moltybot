@@ -4,6 +4,7 @@ import logging
 import os
 import uvicorn
 import socket
+import re
 from typing import List
 from fastapi import UploadFile, File, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -24,7 +25,6 @@ RUNNING_AGENT_NAMES = set()
 GLOBAL_PROXIES = []
 
 def check_local_tor():
-    """Detect if local Tor multi-instances (9050-9060) are active."""
     tor_proxies = []
     for port in range(9050, 9061):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -34,37 +34,31 @@ def check_local_tor():
     return tor_proxies
 
 async def start_agents(json_data=None):
-    """Startup with Auto-Tor, Local File, and Proxy Validation."""
     accounts = load_accounts(json_data)
     if not accounts:
-        logger.warning("No accounts to load. Waiting for manual upload...")
+        logger.warning("No accounts to load.")
         return
 
     global GLOBAL_PROXIES
     proxy_list = []
 
-    # 1. Prioritas 1: Manual Upload via Dashboard (Paling Penting)
     if GLOBAL_PROXIES:
         logger.info(f"Dashboard Proxies detected: {len(GLOBAL_PROXIES)} IPs.")
         proxy_list = await ProxyManager.get_healthy_proxies(GLOBAL_PROXIES, target_count=len(accounts))
 
-    # 2. Prioritas 2: Tor Lokal (Jika di Armbian/Docker)
     if not proxy_list:
         proxy_list = check_local_tor()
         if proxy_list: logger.info(f"Using {len(proxy_list)} local Tor instances.")
 
-    # 3. Prioritas 3: File proxies.txt di folder
     if not proxy_list and os.path.exists("proxies.txt"):
-        logger.info("Using proxies from local proxies.txt file.")
         try:
             with open("proxies.txt", "r") as f:
                 lines = [line.strip() for line in f if line.strip()]
                 proxy_list = await ProxyManager.get_healthy_proxies(lines, target_count=len(accounts))
         except: pass
 
-    # 4. Alternatif Terakhir: Scrape otomatis (Jika semua di atas kosong)
     if not proxy_list:
-        logger.info("No local Tor, file, or uploaded proxies. Scraping public proxies...")
+        logger.info("Scraping public proxies...")
         proxy_list = await ProxyManager.get_healthy_proxies(target_count=len(accounts))
 
     logger.info(f"Using {len(proxy_list)} different IPs for {len(accounts)} agents.")
@@ -77,25 +71,21 @@ async def start_agents(json_data=None):
         wallet = acc.get("walletaddress") or acc.get("wallet_address") or acc.get("wallet")
         if not key: continue
 
-        # Logic: Max 5 bots per IP
         proxy = None
-        proxy_info = "Direct"
+        proxy_display = "Direct"
         if proxy_list:
-            proxy_idx = (i // 5) % len(proxy_list)
-            proxy = proxy_list[proxy_idx]
-            # Meringkas: Ambil bagian IP:Port saja, hilangkan user:pass
+            proxy = proxy_list[i % len(proxy_list)]
+            # Display cleanup logic
             if "@" in proxy:
-                proxy_info = proxy.split('@')[-1]
-            elif "//" in proxy:
-                proxy_info = proxy.split('//')[-1]
+                proxy_display = proxy.split('@')[-1]
             else:
-                proxy_info = proxy
+                proxy_display = proxy.replace("http://", "").replace("socks5://", "").replace("socks4://", "")
         
         agent = AsyncAgent(name=name, api_key=key, wallet_address=wallet, proxy=proxy, index=i)
         AGENTS.append(agent)
         RUNNING_AGENT_NAMES.add(name)
         
-        Monitor.update(name, proxy=proxy_info, proxy_status="Connecting...")
+        Monitor.update(name, proxy=proxy_display, proxy_status="Connecting...")
         asyncio.create_task(agent.start())
         await asyncio.sleep(0.5)
 
@@ -105,31 +95,55 @@ async def upload_proxies(file: UploadFile = File(...)):
     try:
         content = await file.read()
         text = content.decode('utf-8')
-        raw_lines = [line.strip() for line in text.split('\n') if line.strip()]
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
         
         processed = []
-        for line in raw_lines:
-            # Format Detective: IP:PORT:USER:PASS (4 bagian)
-            parts = line.split(':')
-            if len(parts) == 4:
-                ip, port, user, pw = parts
-                processed.append(f"http://{user}:{pw}@{ip}:{port}")
-            # Format Detective: USER:PASS@IP:PORT (sudah ada @)
-            elif "@" in line:
-                if not line.startswith(('http', 'socks')):
-                    processed.append(f"http://{line}")
-                else:
-                    processed.append(line)
-            # Format Default / Lainnya
-            else:
-                if not line.startswith(('http', 'socks')):
-                    processed.append(f"http://{line}")
-                else:
-                    processed.append(line)
+        last_auth = ""
+        
+        # Cari kredensial (USER:PASS) di mana saja dalam file
+        for l in lines:
+            # Match format IP:PORT:USER:PASS
+            m = re.match(r'^([\d\.]+):(\d+):([^:]+):([^:]+)$', l)
+            if m:
+                last_auth = f"{m.group(3)}:{m.group(4)}"
+                break
+            # Match format USER:PASS@IP:PORT
+            m = re.match(r'^([^:]+):([^@]+)@([\d\.]+):(\d+)$', l)
+            if m:
+                last_auth = f"{m.group(1)}:{m.group(2)}"
+                break
+
+        for l in lines:
+            # 1. Sudah ada protokol? (http://... atau socks://...)
+            if "://" in l:
+                processed.append(l)
+                continue
+            
+            # 2. Format IP:PORT:USER:PASS
+            m = re.match(r'^([\d\.]+):(\d+):([^:]+):([^:]+)$', l)
+            if m:
+                processed.append(f"http://{m.group(3)}:{m.group(4)}@{m.group(1)}:{m.group(2)}")
+                continue
                 
+            # 3. Format USER:PASS@IP:PORT
+            if "@" in l:
+                processed.append(f"http://{l}")
+                continue
+                
+            # 4. Format IP:PORT (Gunakan last_auth jika ada)
+            m = re.match(r'^([\d\.]+):(\d+)$', l)
+            if m:
+                if last_auth:
+                    processed.append(f"http://{last_auth}@{m.group(1)}:{m.group(2)}")
+                else:
+                    processed.append(f"http://{l}")
+                continue
+            
+            # 5. Fallback
+            processed.append(f"http://{l}")
+
         GLOBAL_PROXIES = processed
-        logger.info(f"Received {len(GLOBAL_PROXIES)} proxies. Smart format applied.")
-        return {"status": "success", "message": f"{len(GLOBAL_PROXIES)} proxies loaded and formatted!"}
+        return {"status": "success", "message": f"Loaded {len(processed)} proxies. Auth applied: {'Yes' if last_auth else 'No'}"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -154,15 +168,12 @@ def load_accounts(json_data=None):
 
 @app.on_event("startup")
 async def on_startup():
-    """Smart detection for Local vs Railway startup."""
     is_railway = os.environ.get("RAILWAY_ENVIRONMENT_ID") or os.environ.get("RAILWAY_STATIC_URL")
-    
     if is_railway:
-        logger.info("--- [ENVIRONMENT: RAILWAY + TOR DOCKER] ---")
-        # Beri waktu tambahan agar Tor benar-benar konek (100%)
+        logger.info("--- [ENVIRONMENT: RAILWAY] ---")
         await asyncio.sleep(10)
     else:
-        logger.info("--- [ENVIRONMENT: LOCAL / ARMBIAN] ---")
+        logger.info("--- [ENVIRONMENT: LOCAL] ---")
         asyncio.create_task(start_agents())
 
 if __name__ == "__main__":
