@@ -39,6 +39,11 @@
     <div class="header">
         <h1>MoltyBot Command Center</h1>
         <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <!-- Global Proxy Auth -->
+            <div class="upload-box" style="border-color: #f59e0b;">
+                <input type="text" id="proxy-user" placeholder="User" style="font-size: 0.7em; width: 60px; background: transparent; color: white; border: 1px solid #444;">
+                <input type="password" id="proxy-pass" placeholder="Pass" style="font-size: 0.7em; width: 60px; background: transparent; color: white; border: 1px solid #444;">
+            </div>
             <!-- Proxy Panel -->
             <div class="upload-box" style="border-color: #10b981;">
                 <input type="file" id="proxy-file" accept=".txt" style="font-size: 0.7em; width: 130px; color: #aaa;">
@@ -60,9 +65,16 @@
     <script>
         async function uploadProxies() {
             const fileInput = document.getElementById('proxy-file');
+            const user = document.getElementById('proxy-user').value;
+            const pass = document.getElementById('proxy-pass').value;
+            
             if (fileInput.files.length === 0) return alert("Select a .txt proxy file!");
+            
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
+            if (user) formData.append('user', user);
+            if (pass) formData.append('pass', pass);
+
             try {
                 const res = await fetch('/api/upload-proxies', { method: 'POST', body: formData });
                 const result = await res.json();

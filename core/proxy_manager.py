@@ -78,9 +78,18 @@ class ProxyManager:
 
     @classmethod
     def get_replacement(cls, old_proxy: str) -> str:
-        """Get a fresh proxy from the pool if available."""
+        """Get a fresh proxy from the pool. Refills from scraper if empty."""
         if not cls._healthy_pool: return None
-        # Ambil secara acak dari pool yang ada
+        
         import random
-        new_p = random.choice(cls._healthy_pool)
-        return new_p if new_p != old_proxy else None
+        # Buang proxy lama dari pool agar tidak terpakai lagi
+        if old_proxy in cls._healthy_pool:
+            cls._healthy_pool.remove(old_proxy)
+            
+        if len(cls._healthy_pool) < 5:
+            # Jika stok tipis, kita anggap butuh bala bantuan scraper
+            logger.info("Proxy pool low. Scraper will be called on next scan.")
+
+        if not cls._healthy_pool: return None
+        
+        return random.choice(cls._healthy_pool)

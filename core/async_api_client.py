@@ -53,6 +53,10 @@ class AsyncAPIClient:
             try:
                 session = await self.get_session()
                 async with session.request(method, url, json=json) as resp:
+                    # 1. Handle IP Whitelist/Auth Block (403/407)
+                    if resp.status in (403, 407):
+                        raise APIError(f"Proxy Blocked (IP not whitelisted or Auth required)", "PROXY_AUTH_ERROR")
+
                     if resp.status == 429:
                         await asyncio.sleep(30 * (attempt + 1))
                         continue

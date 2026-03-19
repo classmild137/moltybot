@@ -89,8 +89,10 @@ async def start_agents(json_data=None):
         asyncio.create_task(agent.start())
         await asyncio.sleep(0.5)
 
+from fastapi import Form
+
 @app.post("/api/upload-proxies")
-async def upload_proxies(file: UploadFile = File(...)):
+async def upload_proxies(file: UploadFile = File(...), user: str = Form(None), pass_: str = Form(None, alias="pass")):
     global GLOBAL_PROXIES
     try:
         content = await file.read()
@@ -98,52 +100,32 @@ async def upload_proxies(file: UploadFile = File(...)):
         lines = [line.strip() for line in text.split('\n') if line.strip()]
         
         processed = []
-        last_auth = ""
+        global_auth = f"{user}:{pass_}" if user and pass_ else ""
         
-        # Cari kredensial (USER:PASS) di mana saja dalam file
         for l in lines:
-            # Match format IP:PORT:USER:PASS
-            m = re.match(r'^([\d\.]+):(\d+):([^:]+):([^:]+)$', l)
-            if m:
-                last_auth = f"{m.group(3)}:{m.group(4)}"
-                break
-            # Match format USER:PASS@IP:PORT
-            m = re.match(r'^([^:]+):([^@]+)@([\d\.]+):(\d+)$', l)
-            if m:
-                last_auth = f"{m.group(1)}:{m.group(2)}"
-                break
-
-        for l in lines:
-            # 1. Sudah ada protokol? (http://... atau socks://...)
+            # Jika sudah ada protokol, simpan apa adanya
             if "://" in l:
-                processed.append(l)
-                continue
+                processed.append(l); continue
             
-            # 2. Format IP:PORT:USER:PASS
+            # Jika ada format IP:PORT:USER:PASS, gunakan auth baris tersebut
             m = re.match(r'^([\d\.]+):(\d+):([^:]+):([^:]+)$', l)
             if m:
                 processed.append(f"http://{m.group(3)}:{m.group(4)}@{m.group(1)}:{m.group(2)}")
                 continue
-                
-            # 3. Format USER:PASS@IP:PORT
-            if "@" in l:
-                processed.append(f"http://{l}")
-                continue
-                
-            # 4. Format IP:PORT (Gunakan last_auth jika ada)
+
+            # Jika format IP:PORT, gunakan Global Auth (jika ada)
             m = re.match(r'^([\d\.]+):(\d+)$', l)
             if m:
-                if last_auth:
-                    processed.append(f"http://{last_auth}@{m.group(1)}:{m.group(2)}")
+                if global_auth:
+                    processed.append(f"http://{global_auth}@{m.group(1)}:{m.group(2)}")
                 else:
                     processed.append(f"http://{l}")
                 continue
             
-            # 5. Fallback
             processed.append(f"http://{l}")
 
         GLOBAL_PROXIES = processed
-        return {"status": "success", "message": f"Loaded {len(processed)} proxies. Auth applied: {'Yes' if last_auth else 'No'}"}
+        return {"status": "success", "message": f"Loaded {len(processed)} proxies. Global Auth: {'Active' if global_auth else 'None'}"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
