@@ -21,7 +21,7 @@ class AsyncAPIClient:
             "Content-Type": "application/json",
             "X-API-Key": api_key
         }
-        self.timeout = ClientTimeout(total=20)
+        self.timeout = ClientTimeout(total=10) # Strict 10s for anti-lag
         self._session: Optional[ClientSession] = None
 
     async def get_session(self) -> ClientSession:

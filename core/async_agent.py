@@ -25,21 +25,15 @@ class AsyncAgent:
         self.wallet_address = wallet_address
         self.index = index
         self.api = AsyncAPIClient(BASE_URL, api_key, proxy=proxy)
-        
-        # Initialize components
         self.memory = GameMemory(data_dir=f"{data_dir}/{name}")
         self.learning = LearningEngine(self.memory)
         self.analyzer = StateAnalyzer() 
         self.strategy = StrategyEngine(self.analyzer, self.memory, self.learning)
-        
         self.game_id: Optional[str] = None
         self.agent_id: Optional[str] = None
         self.running = True
-        
-        # Economy State
         self.smoltz_balance = 0
         self.moltz_balance = 0
-
         Monitor.register(self.name, self.wallet_address)
 
     async def log(self, msg: str):
@@ -51,84 +45,77 @@ class AsyncAgent:
         from core.proxy_manager import ProxyManager
         new_p = ProxyManager.get_replacement(self.api.proxy)
         if new_p:
-            await self.log(f"Proxy failed! Refreshing session with new IP...")
+            await self.log(f"ANTI-BENGONG: Proxy Lagging/Disconnected. Swapping IP...")
             await self.api.close()
             self.api.proxy = new_p
             p_info = new_p.split('@')[-1] if '@' in new_p else new_p.split('/')[-1]
-            Monitor.update(self.name, proxy=p_info, proxy_status="Session Reset")
+            Monitor.update(self.name, proxy=p_info, proxy_status="Fast Swapped")
             return True
         return False
 
     async def update_economy_stats(self, account: dict):
-        """Parse and update economic stats."""
         self.smoltz_balance = account.get("balance", 0)
         self.moltz_balance = account.get("moltz", account.get("walletBalance", 0))
         wins = account.get("totalWins", 0)
         games = account.get("totalGames", 0)
         mode = "Hunting (Paid)" if self.smoltz_balance >= 100 else "Farming (Free)"
-        
-        Monitor.update(self.name, 
-            smoltz_balance=self.smoltz_balance,
-            moltz_balance=self.moltz_balance,
-            mode=mode,
-            win_ratio=f"{wins}/{games}"
-        )
+        Monitor.update(self.name, smoltz_balance=self.smoltz_balance, moltz_balance=self.moltz_balance, mode=mode, win_ratio=f"{wins}/{games}")
 
     async def start(self):
-        """Main Agent Loop with Persistent Session"""
+        """Main Agent Loop with Anti-Bengong Guard"""
         await self.log("Starting agent...")
         fail_count = 0
         
         while self.running:
             try:
+                # 1. Verify Account & Resume Game
+                # Paksa Timeout 10s via client (sudah di set di api_client)
                 account = await self.api.get_account()
-                if not account or not isinstance(account, dict):
-                    raise Exception("Failed to get account data")
+                if not account: raise Exception("API Hang: No response")
 
                 fail_count = 0 
                 self.name = account.get("name", self.name)
-                Monitor.update(self.name, proxy_status="Success ✓")
+                Monitor.update(self.name, proxy_status="Connected ✓")
                 await self.update_economy_stats(account)
                 
-                server_wallet = account.get("walletAddress") or account.get("wallet")
-                if not server_wallet and self.wallet_address:
-                    await self.api.set_wallet(self.wallet_address)
-                
+                # Check for active games
                 current_games = account.get("currentGames") or []
                 for game in current_games:
-                    if game.get("gameStatus") in ("running", "waiting"):
-                        if game.get("isAlive", True):
-                            self.game_id = game.get("gameId")
-                            self.agent_id = game.get("agentId")
-                            await self.log(f"Resuming game {self.game_id[:8]}...")
-                            Monitor.update(self.name, status="Resuming", game_id=self.game_id)
-                            await self.play_game()
-                            break
+                    if game.get("gameStatus") in ("running", "waiting") and game.get("isAlive", True):
+                        self.game_id = game.get("gameId")
+                        self.agent_id = game.get("agentId")
+                        await self.log(f"Resuming {self.game_id[:8]}...")
+                        Monitor.update(self.name, status="Resuming", game_id=self.game_id)
+                        await self.play_game()
+                        break
                 else:
                     if not await self.find_and_join_game():
-                        await asyncio.sleep(10)
+                        await asyncio.sleep(5)
                         continue
                     await self.play_game()
 
             except Exception as e:
                 fail_count += 1
                 msg = str(e)
-                if "429" in msg: msg = "Rate Limited (429)"
-                await self.log(f"Connection Issue ({fail_count}/3): {msg}")
+                # Anti-Bengong Detection (Timeout / Connect Error)
+                is_hang = "Timeout" in msg or "Connection" in msg or "closed" in msg or "402" in msg
                 
-                if fail_count >= 3:
+                await self.log(f"Issue ({fail_count}/3): {msg[:40]}...")
+                
+                if fail_count >= 3 or (fail_count >= 1 and is_hang):
+                    # Jika hang (bengong), jangan tunggu 3x, langsung rotasi!
+                    await self.log("ANTI-BENGONG TRIPPED! Fast Rotating...")
                     if await self.rotate_proxy():
                         fail_count = 0
-                    await asyncio.sleep(15)
+                    await asyncio.sleep(2)
                 else:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(5) # Delay normal 5 detik
                 continue
 
     async def find_and_join_game(self) -> bool:
         """Sequential hunting using Global Throttle (max 1 search per 2s)."""
-        Monitor.update(self.name, status="Waiting Queue", game_id="-", region="-", hp=100, ep=10)
-        while not Monitor.can_search():
-            await asyncio.sleep(0.5)
+        Monitor.update(self.name, status="In Queue", game_id="-", region="-", hp=100, ep=10)
+        while not Monitor.can_search(): await asyncio.sleep(0.5)
 
         Monitor.update(self.name, status="Searching")
         try:
@@ -141,35 +128,24 @@ class AsyncAgent:
             rooms = await self.api.list_games(status="waiting")
             Monitor.release_search()
 
-            if rooms is None: return False
-            candidate_games = []
+            if not rooms: return False
+            candidates = [g for g in rooms if (target_type == "paid" and (g.get("entryType") == "paid" or g.get("currency") == "smoltz")) or (target_type == "free" and g.get("entryFee", 0) == 0)]
             
-            if target_type == "paid":
-                candidate_games = [g for g in rooms if g.get("entryType") == "paid" or (g.get("entryFee", 0) > 0 and g.get("currency") == "smoltz")]
-                if not candidate_games: target_type = "free"
-            
-            if target_type == "free":
-                candidate_games = [g for g in rooms if g.get("entryType") == "free" or g.get("entryFee", 0) == 0]
+            if not candidates: return False
 
-            if not candidate_games: return False
-
-            target_game = candidate_games[0]
-            gid = target_game["id"]
-            await self.log(f"FOUND {target_type.upper()} ROOM: {target_game.get('name')}! Joining...")
-            
+            target = candidates[0]
+            await self.log(f"Join {target_type.upper()}: {target.get('name')}")
             try:
-                agent = await self.api.register_agent(gid, self.name)
-                self.game_id = gid
+                agent = await self.api.register_agent(target["id"], self.name)
+                self.game_id = target["id"]
                 self.agent_id = agent["id"]
-                await self.log("Joined successfully!")
+                await self.log("Joined!")
                 return True
             except APIError as e:
                 if e.code == "INSUFFICIENT_BALANCE": self.smoltz_balance = 0
                 return False
-
         except Exception as e:
             Monitor.release_search()
-            await self.log(f"Hunting Error: {e}")
             return False
 
     async def play_game(self):
@@ -184,49 +160,35 @@ class AsyncAgent:
                 now = time.time()
                 if now - last_health_check > 900:
                     last_health_check = now
-                    try:
-                        acc = await self.api.get_account()
-                        active = acc.get("currentGames") or []
-                        if not any(g.get("gameId") == self.game_id for g in active):
-                            await self.log("Health Check: Game gone. Exiting.")
-                            return
-                    except: pass
+                    acc = await self.api.get_account()
+                    if not any(g.get("gameId") == self.game_id for g in (acc.get("currentGames") or [])):
+                        await self.log("Health Check: Game gone."); return
                 
                 if now - last_action_time < TURN_INTERVAL:
-                    await asyncio.sleep(1)
-                    continue
+                    await asyncio.sleep(1); continue
 
                 try:
                     state_data = await self.api.get_state(self.game_id, self.agent_id)
                 except APIError as e:
                     if e.code in ("GAME_NOT_FOUND", "AGENT_NOT_FOUND"):
-                        await self.log("Game ended unexpectedly. Returning to hunt.")
-                        self.game_id = None
-                        return
+                        await self.log("Game gone."); self.game_id = None; return
                     raise e
 
                 if not state_data or not isinstance(state_data, dict):
-                    await asyncio.sleep(5)
-                    continue
+                    await asyncio.sleep(5); continue
                 
                 self_data = state_data.get("self")
-                if not self_data:
-                    await asyncio.sleep(5)
-                    continue
+                if not self_data: await asyncio.sleep(5); continue
 
                 is_alive = self_data.get("isAlive", True)
                 game_status = state_data.get("gameStatus")
                 res_obj = state_data.get("result") or {}
                 reg_obj = state_data.get("currentRegion") or {}
 
-                Monitor.update(self.name, 
-                    hp=self_data.get("hp", 0), ep=self_data.get("ep", 0),
-                    region=reg_obj.get("name", "Unknown"), game_id=self.game_id,
-                    status="Playing" if is_alive else "Eliminated"
-                )
+                Monitor.update(self.name, hp=self_data.get("hp", 0), ep=self_data.get("ep", 0), region=reg_obj.get("name", "Unknown"), game_id=self.game_id, status="Playing" if is_alive else "Eliminated")
 
                 if not is_alive or game_status == "finished":
-                    await self.log(f"Session Finished. Rank: {res_obj.get('finalRank', '?')}")
+                    await self.log(f"Session End. Rank: {res_obj.get('finalRank', '?')}")
                     try:
                         acc_info = await self.api.get_account()
                         if acc_info: await self.update_economy_stats(acc_info)
@@ -235,7 +197,6 @@ class AsyncAgent:
 
                 intel = self.analyzer.parse(state_data)
                 main_action, reasoning, free_actions = self.strategy.decide(intel)
-
                 for action in free_actions: await self.api.take_action(self.game_id, self.agent_id, action)
                 
                 if main_action:
@@ -246,9 +207,9 @@ class AsyncAgent:
                         turn_count += 1
                         await self.log(f"T{turn_count} {main_action['type'].upper()}")
                         Monitor.update(self.name, last_action=f"{main_action['type']} (T{turn_count})")
-                else:
-                    await asyncio.sleep(5)
+                else: await asyncio.sleep(5)
 
             except Exception as e:
-                await self.log(f"Turn Error: {str(e)}")
+                await self.log(f"Turn Error: {str(e)[:30]}...")
+                if "Timeout" in str(e): await self.rotate_proxy()
                 await asyncio.sleep(10)
